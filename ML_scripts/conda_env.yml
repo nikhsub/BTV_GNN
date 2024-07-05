@@ -1,0 +1,33 @@
+name: training
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9.14
+  - pip
+  - boost
+  - root=6.22.6
+  - pandas
+  # - root=6.22.6=py36heda87ca_0
+  - jupyter
+  - numpy
+  - xrootd
+  - pytorch
+  - pip:
+    - dcor
+    - lz4
+    - xxhash
+    - xgboost
+    - fast_histogram
+    - awkward0
+    - matplotlib
+    - pandas
+    - cython
+    - Pillow
+    - root-numpy
+    - scipy
+    - scikit-learn
+    - seaborn
+    - setgpu
+    - tqdm
+    - uproot3
+    - torch-geometric
