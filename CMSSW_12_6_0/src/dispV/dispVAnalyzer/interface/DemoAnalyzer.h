@@ -45,6 +45,9 @@
 #include "TrackingTools/Records/interface/TransientTrackRecord.h"
 #include "MagneticField/Engine/interface/MagneticField.h"
 
+//Pileup info
+#include "SimDataFormats/PileupSummaryInfo/interface/PileupSummaryInfo.h"
+
 //IPTOOLS
 #include "TrackingTools/IPTools/interface/IPTools.h"
 
@@ -63,7 +66,7 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
       virtual void endJob() override;
       std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
-      bool checkPDG(int abs_pdg);
+      int checkPDG(int abs_pdg);
 
 
       
@@ -78,23 +81,30 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       TTree *tree;
       double TrackPtCut_;
 
+      edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
+
+      float nPU;
+
       std::vector<float> Hadron_pt;
       std::vector<float> Hadron_eta;
       std::vector<float> Hadron_phi;
-      std::vector<float> Hadron_SVx;
-      std::vector<float> Hadron_SVy;
-      std::vector<float> Hadron_SVz;
+      std::vector<float> Hadron_GVx;
+      std::vector<float> Hadron_GVy;
+      std::vector<float> Hadron_GVz;
       std::vector<int> nHadrons;
-      std::vector<int> nSV;
-      std::vector<float> Daughter1_pt;
-      std::vector<float> Daughter1_eta;
-      std::vector<float> Daughter1_phi;
-      std::vector<float> Daughter1_charge;
-      std::vector<float> Daughter2_pt;
-      std::vector<float> Daughter2_eta;
-      std::vector<float> Daughter2_phi;
-      std::vector<float> Daughter2_charge;
-
+      std::vector<int> nGV;
+      std::vector<int> nGV_B;
+      std::vector<int> nGV_D;
+      std::vector<int> GV_flag;
+      std::vector<int> nDaughters;
+      std::vector<int> nDaughters_B;
+      std::vector<int> nDaughters_D;
+      std::vector<int> Daughters_flag;
+      std::vector<float> Daughters_pt;
+      std::vector<float> Daughters_eta;
+      std::vector<float> Daughters_phi;
+      std::vector<float> Daughters_charge;
+           
       std::vector<int> ntrks;
       std::vector<float> trk_ip2d;
       std::vector<float> trk_ip3d;
@@ -103,6 +113,7 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<float> trk_pt;
       std::vector<float> trk_eta;
       std::vector<float> trk_phi;
+      std::vector<float> trk_charge;
 
       std::vector<int> njets;
       std::vector<float> jet_pt;

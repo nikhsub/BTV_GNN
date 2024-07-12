@@ -1,6 +1,6 @@
 from ROOT import *
 
-infile = "test_output.root"
+infile = "testout_0907.root"
 
 Infile = TFile(infile, 'READ')
 #tree_dir = Infile.Get('btagana')
@@ -20,5 +20,5 @@ for evt in tree:
     #print(evt.Daughter1_pt)
     #print(evt.Daughter2_pt)
     
-    #break;
+    break;
 

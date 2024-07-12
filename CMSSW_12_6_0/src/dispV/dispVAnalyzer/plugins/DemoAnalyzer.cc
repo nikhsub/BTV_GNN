@@ -31,7 +31,8 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig):
 	jet_collT_ (consumes<edm::View<reco::Jet> >(iConfig.getUntrackedParameter<edm::InputTag>("jets"))),
 	prunedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("pruned"))),
   	packedGenToken_(consumes<edm::View<pat::PackedGenParticle> >(iConfig.getParameter<edm::InputTag>("packed"))),
-	TrackPtCut_(iConfig.getUntrackedParameter<double>("TrackPtCut"))
+	TrackPtCut_(iConfig.getUntrackedParameter<double>("TrackPtCut")),
+	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo")))
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -68,20 +69,23 @@ std::optional<std::tuple<float, float, float>> DemoAnalyzer::isAncestor(const re
     return std::nullopt;  // Return an empty optional if no ancestor found
 }
 
-bool DemoAnalyzer::checkPDG(int abs_pdg)
+int DemoAnalyzer::checkPDG(int abs_pdg)
 {
-	std::vector<int> pdgList = { 521, 511, 531, 541, //Bottom mesons
-			 	     411, 421, 431,      // Charmed mesons
-			     	     4122, 4222, 4212, 4112, 4232, 4132, 4332, 4412, 4422, 4432, 4444,
-				     5122, 5112, 5212, 5222, 5132, 5232, 5142, 5332, 5142, 5242, 5342, 5512, 5532, 5542, 5554};
+	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
+				       5122, 5112, 5212, 5222, 5132, 5232, 5142, 5332, 5142, 5242, 5342, 5512, 5532, 5542, 5554}; //Bottom Baryons
 
-	if(std::find(pdgList.begin(), pdgList.end(), abs_pdg) != pdgList.end()){
-		return true;
+	std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
+                                     4122, 4222, 4212, 4112, 4232, 4132, 4332, 4412, 4422, 4432, 4444}; //Charmed Baryons
+
+	if(std::find(pdgList_B.begin(), pdgList_B.end(), abs_pdg) != pdgList_B.end()){
+		return 1;
+	}
+	else if(std::find(pdgList_D.begin(), pdgList_D.end(), abs_pdg) != pdgList_D.end()){
+	       	return 2;
 	}
 	else{
-	       	return false;
+		return 0;
 	}
-
 
 }
 
@@ -97,22 +101,27 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   using namespace reco;
   using namespace pat;
 
+  nPU = 0;
+
   Hadron_pt.clear();
   Hadron_eta.clear();
   Hadron_phi.clear();
-  Hadron_SVx.clear();
-  Hadron_SVy.clear();
-  Hadron_SVz.clear(); 
+  Hadron_GVx.clear();
+  Hadron_GVy.clear();
+  Hadron_GVz.clear(); 
   nHadrons.clear();
-  nSV.clear();
-  Daughter1_pt.clear();
-  Daughter1_eta.clear();
-  Daughter1_phi.clear();
-  Daughter1_charge.clear();
-  Daughter2_pt.clear();
-  Daughter2_eta.clear();
-  Daughter2_phi.clear();
-  Daughter2_charge.clear();
+  nGV.clear();
+  nGV_B.clear();
+  nGV_D.clear();
+  GV_flag.clear();
+  nDaughters.clear();
+  nDaughters_B.clear();
+  nDaughters_D.clear();
+  Daughters_flag.clear();
+  Daughters_pt.clear();
+  Daughters_eta.clear();
+  Daughters_phi.clear();
+  Daughters_charge.clear();
 
   ntrks.clear();
   trk_ip2d.clear();
@@ -122,6 +131,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   trk_pt.clear();
   trk_eta.clear();
   trk_phi.clear();
+  trk_charge.clear();
 
   njets.clear();
   jet_pt.clear();
@@ -135,6 +145,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   Handle<edm::View<reco::GenParticle> > pruned;
   Handle<edm::View<pat::PackedGenParticle> > packed;
   Handle<reco::VertexCollection> pvHandle;
+  Handle<std::vector< PileupSummaryInfo > > PupInfo;
 
   std::vector<reco::Track> alltracks;
 
@@ -150,6 +161,18 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
   GlobalVector direction(1,0,0);
   direction = direction.unit();
+
+  iEvent.getByToken(PupInfoT_, PupInfo);
+      std::vector<PileupSummaryInfo>::const_iterator PVI;
+       for(PVI = PupInfo->begin(); PVI != PupInfo->end(); ++PVI){
+
+           int BX = PVI->getBunchCrossing();
+           if(BX ==0) {
+               nPU = PVI->getTrueNumInteractions();
+               continue;
+           }
+
+   }
 
   for (auto const& itrack : *patcan){
        if (itrack.trackHighPurity() && itrack.hasTrackDetails()){
@@ -192,79 +215,107 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	trk_pt.push_back(track.pt());
 	trk_eta.push_back(track.eta());
 	trk_phi.push_back(track.phi());
+	trk_charge.push_back(track.charge());
 	ntrk++;
    }
    ntrks.push_back(ntrk);
 
    int nhads = 0;
-   int nsv = 0;
+   int ngv = 0;
+   int ngv_b = 0;
+   int ngv_d = 0;
+   int nd = 0;
+   int nd_b = 0;
+   int nd_d = 0;
+   std::vector<float> temp_Daughters_pt;
+   std::vector<float> temp_Daughters_eta;
+   std::vector<float> temp_Daughters_phi;
+   std::vector<int> temp_Daughters_charge;
+   std::vector<int> temp_Daughters_flag;
    for(size_t i=0; i< pruned->size();i++)
    { //prune loop
 	const Candidate * prun_part = &(*pruned)[i];
 	if(!(prun_part->pt() > 10 && std::abs(prun_part->eta()) < 2.5)) continue;
-	if(checkPDG(std::abs(prun_part->pdgId())))
+	int hadPDG = checkPDG(std::abs(prun_part->pdgId()));
+	int had_parPDG = checkPDG(std::abs(prun_part->mother(0)->pdgId()));
+	if(hadPDG > 0 && !(hadPDG == had_parPDG))
 	{ //if pdg
 		nhads++;
 		Hadron_pt.push_back(prun_part->pt());
 		Hadron_eta.push_back(prun_part->eta());
 		Hadron_phi.push_back(prun_part->phi());
-                for(size_t j=0; j< packed->size();j++)
-		{ //packed outer
-			bool tobreak = false;
-			const Candidate *pack1 =  &(*packed)[j];
-			if(!(pack1->pt() > 1 && std::abs(pack1->eta()) < 2.5 && std::abs(pack1->charge()) > 0)) continue;
-			const Candidate * mother1 = pack1->mother(0);
-			float vx1 = std::numeric_limits<float>::quiet_NaN();
-    			float vy1 = std::numeric_limits<float>::quiet_NaN();
-    			float vz1 = std::numeric_limits<float>::quiet_NaN();
-			if(mother1 != nullptr)
-			{
-				auto SV1 = isAncestor(prun_part, mother1);
-				if(SV1.has_value())
-				{
-					std::tie(vx1, vy1, vz1) = *SV1;
-				}
-			}
-			for(size_t k=0; k<packed->size(); k++)
-			{ //Packed inner
-				if(j==k) continue;
-				const Candidate *pack2 =  &(*packed)[k];
-				if(!(pack2->pt() > 1 && std::abs(pack2->eta()) < 2.5 && std::abs(pack2->charge()) > 0)) continue;
-				const Candidate * mother2 = pack2->mother(0);
-                                if(mother2 !=nullptr){
-					auto SV2 = isAncestor(prun_part, mother2);
-					if(SV2.has_value()){
-						auto [vx2, vy2, vz2] = *SV2;
-						if (!std::isnan(vx1) && !std::isnan(vy1) && !std::isnan(vz1) && !std::isnan(vx2) && !std::isnan(vy2) && !std::isnan(vz2)) 
-						{
-							nsv++;
-							Daughter1_pt.push_back(pack1->pt());
-							Daughter2_pt.push_back(pack2->pt());
-                                                        Daughter1_eta.push_back(pack1->eta());
-                                                        Daughter2_eta.push_back(pack2->eta());
-                                                        Daughter1_phi.push_back(pack1->phi());
-                                                        Daughter2_phi.push_back(pack2->phi());
-                                                        Daughter1_charge.push_back(pack1->charge());
-                                                        Daughter2_charge.push_back(pack2->charge());
-							Hadron_SVx.push_back(vx1);
-							Hadron_SVy.push_back(vy1); //Here each vertex coordinate will correspond to the vertex of the had
-							Hadron_SVz.push_back(vz1); //desc it thinks is coming from this corresponding daugther in the loop
-							//Hadron_SVx.push_back(vx2);
-                                                        //Hadron_SVy.push_back(vy2); 
-							//Hadron_SVz.push_back(vz2);
-							tobreak = true;
-							break;
-						}
+		bool addedGV = false;
+		int nPack = 0;
+		float vx = std::numeric_limits<float>::quiet_NaN();
+                float vy = std::numeric_limits<float>::quiet_NaN();
+                float vz = std::numeric_limits<float>::quiet_NaN();
+
+		for(size_t j=0; j< packed->size(); j++){
+			const Candidate *pack =  &(*packed)[j];
+			if(!(pack->pt() > 1 && std::abs(pack->eta()) < 2.5 && std::abs(pack->charge()) > 0)) continue;
+                        const Candidate * mother = pack->mother(0);
+                        if(mother != nullptr)
+                        {
+                                auto GV = isAncestor(prun_part, mother);
+                                if(GV.has_value())
+                                {
+                                        std::tie(vx, vy, vz) = *GV;
+					if (!std::isnan(vx) && !std::isnan(vy) && !std::isnan(vz)){
+						nPack++;
+						temp_Daughters_pt.push_back(pack->pt());
+            					temp_Daughters_eta.push_back(pack->eta());
+            					temp_Daughters_phi.push_back(pack->phi());
+            					temp_Daughters_charge.push_back(pack->charge());
+            					temp_Daughters_flag.push_back(i);
+						
 					}
-				}
-			} //Packed inner
-			if(tobreak) break;
-		} //packed outer
+						
+                                }
+				
+                        }
+			
+		}
+	   
+		if(nPack >=2){
+			if(!addedGV){
+				ngv++;
+				if(hadPDG==1) ngv_b++;
+                	        if(hadPDG==2) ngv_d++;
+			        Hadron_GVx.push_back(vx);
+                	        Hadron_GVy.push_back(vy); 
+                	        Hadron_GVz.push_back(vz); 
+                	        GV_flag.push_back(hadPDG);	
+			        addedGV = true;
+			}
+			Daughters_pt.insert(Daughters_pt.end(), temp_Daughters_pt.begin(), temp_Daughters_pt.end());
+                	Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
+                	Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
+                	Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
+                	Daughters_flag.insert(Daughters_flag.end(), temp_Daughters_flag.begin(), temp_Daughters_flag.end());
+			nd = nPack;
+			if(hadPDG==1) nd_b = nd;
+			if(hadPDG==2) nd_d = nd;
+
+			nDaughters.push_back(nd);
+   			nDaughters_B.push_back(nd_b);
+   			nDaughters_D.push_back(nd_d);
+
+                	// Clear the temporary vectors
+                	temp_Daughters_pt.clear();
+                	temp_Daughters_eta.clear();
+                	temp_Daughters_phi.clear();
+                	temp_Daughters_charge.clear();
+                	temp_Daughters_flag.clear();
+
+		}
 	} //if pdg
 
    } //prune loop
+
    nHadrons.push_back(nhads);
-   nSV.push_back(nsv);
+   nGV.push_back(ngv);
+   nGV_B.push_back(ngv_b);
+   nGV_D.push_back(ngv_d);
 
    tree->Fill();
 
@@ -272,23 +323,27 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
 // ------------ method called once each job just before starting event loop  ------------
 void DemoAnalyzer::beginJob() {
+	tree->Branch("nPU", &nPU);
 	tree->Branch("nHadrons", &nHadrons);
 	tree->Branch("Hadron_pt", &Hadron_pt);
 	tree->Branch("Hadron_eta", &Hadron_eta);
 	tree->Branch("Hadron_phi", &Hadron_phi);
-	tree->Branch("Hadron_SVx", &Hadron_SVx);
-	tree->Branch("Hadron_SVy", &Hadron_SVy);
-	tree->Branch("Hadron_SVz", &Hadron_SVz);
-	tree->Branch("nSV", &nSV);
-	tree->Branch("Daughter1_pt", &Daughter1_pt);
-	tree->Branch("Daughter1_eta", &Daughter1_eta);
-	tree->Branch("Daughter1_phi", &Daughter1_phi);
-	tree->Branch("Daughter1_charge", &Daughter1_charge);
-	tree->Branch("Daughter2_pt", &Daughter2_pt);
-        tree->Branch("Daughter2_eta", &Daughter2_eta);
-        tree->Branch("Daughter2_phi", &Daughter2_phi);
-        tree->Branch("Daughter2_charge", &Daughter2_charge);
-
+	tree->Branch("Hadron_GVx", &Hadron_GVx);
+	tree->Branch("Hadron_GVy", &Hadron_GVy);
+	tree->Branch("Hadron_GVz", &Hadron_GVz);
+	tree->Branch("nGV", &nGV);
+	tree->Branch("nGV_B", &nGV_B);
+	tree->Branch("nGV_D", &nGV_D);
+	tree->Branch("GV_flag", &GV_flag);
+	tree->Branch("nDaughters", &nDaughters);
+	tree->Branch("nDaughters_B", &nDaughters_B);
+	tree->Branch("nDaughters_D", &nDaughters_D);
+	tree->Branch("Daughters_flag", &Daughters_flag);
+	tree->Branch("Daughters_pt", &Daughters_pt);
+	tree->Branch("Daughters_eta", &Daughters_eta);
+	tree->Branch("Daughters_phi", &Daughters_phi);
+	tree->Branch("Daughters_charge", &Daughters_charge);
+	
 	tree->Branch("nTrks", &ntrks);
 	tree->Branch("trk_ip2d", &trk_ip2d);
 	tree->Branch("trk_ip3d", &trk_ip3d);
@@ -297,6 +352,7 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("trk_pt", &trk_pt);
 	tree->Branch("trk_eta", &trk_eta);
 	tree->Branch("trk_phi", &trk_phi);
+	tree->Branch("trk_charge", &trk_charge);
 
 	tree->Branch("nJets", &njets);
 	tree->Branch("jet_pt", &jet_pt);

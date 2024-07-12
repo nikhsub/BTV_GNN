@@ -23,8 +23,8 @@ Infile = TFile(infile, 'READ')
 demo = Infile.Get('demo')
 tree = demo.Get('tree')
 
-Outfile_sig = TFile(args.out+"_sig.root", "recreate")
-outtree_sig = TTree("tree", "tree")
+Outfile = TFile(args.out+".root", "recreate")
+outtree = TTree("tree", "tree")
 
 Outfile_bkg = TFile(args.out+"_bkg.root", "recreate")
 outtree_bkg = TTree("tree", "tree")
