@@ -26,6 +26,5 @@ ML_scripts/pics
 IVF/files
 IVF/files_models
 IVF/__pycache__
-RandlaMod/files
-RandlaMod/files_models
-RandlaMod/__pycache__
+RandlaMod/
+CMSSW_12_6_0/src/analysis/.trkinfo.py.swp
