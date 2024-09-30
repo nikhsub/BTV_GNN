@@ -22,3 +22,9 @@ CMSSW_12_6_0/lib
 CMSSW_12_6_0/objs
 CMSSW_12_6_0/test
 ML_scripts/pics
+IVF/files
+IVF/files_models
+IVF/__pycache__
+RandlaMod/files
+RandlaMod/files_models
+RandlaMod/__pycache__
