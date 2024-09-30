@@ -21,6 +21,7 @@ CMSSW_12_6_0/external
 CMSSW_12_6_0/lib
 CMSSW_12_6_0/objs
 CMSSW_12_6_0/test
+CMSSW_12_6_0/src/analysis/oldfiles
 ML_scripts/pics
 IVF/files
 IVF/files_models
