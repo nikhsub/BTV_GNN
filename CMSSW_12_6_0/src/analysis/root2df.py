@@ -8,9 +8,10 @@ import pandas as pd
 import random
 
 
-parser = argparse.ArgumentParser(description="Convert signal and bkg files to numpy arrays")
-parser.add_argument("-s", "--signal", default="", help="Name of signal ROOT file")
-parser.add_argument("-b", "--background", default="", help="Name of background ROOT file")
+parser = argparse.ArgumentParser(description="Convert signal a files to numpy arrays")
+#parser.add_argument("-s", "--signal", default="", help="Name of signal ROOT file")
+#parser.add_argument("-b", "--background", default="", help="Name of background ROOT file")
+parser.add_argument("-s", "--signal", default="", help="Name of ROOT file")
 parser.add_argument("-o", "--out", default="", help="Name of output dataframe")
 parser.add_argument("-n", "--numbkg", default=20, help="Number of bkg tracks per b-hadron")
 

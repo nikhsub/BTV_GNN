@@ -1,6 +1,6 @@
 from ROOT import *
 
-infile = "testout_0907.root"
+infile = "ttbar_2000_2907.root"
 
 Infile = TFile(infile, 'READ')
 #tree_dir = Infile.Get('btagana')

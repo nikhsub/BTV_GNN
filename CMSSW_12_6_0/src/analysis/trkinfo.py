@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 #import array
 import math
+import numpy as np
 
 parser = argparse.ArgumentParser("Create track information root file")
 
@@ -23,51 +24,28 @@ Infile = TFile(infile, 'READ')
 demo = Infile.Get('demo')
 tree = demo.Get('tree')
 
-Outfile = TFile(args.out+"_out.root", "recreate")
+Outfile = TFile(args.out+".root", "recreate")
 outtree = TTree("tree", "tree")
 
 
-ip2d      = std.vector('double')()
-ip3d      = std.vector('double')()
-ip2dsig   = std.vector('double')()
-ip3dsig   = std.vector('double')()
-p         = std.vector('double')()
-pt        = std.vector('double')()
-eta       = std.vector('double')()
-phi       = std.vector('double')()
-charge    = std.vector('double')()
+ind       = std.vector('int')()
+flag      = std.vector('int')()
+flav      = std.vector('int')()
+mindr     = std.vector('double')()
+ptrat     = std.vector('double')()
 
-#chi2_bkg      = std.vector('int')()
-#nHitAll_bkg   = std.vector('int')()
-#nHitPixel_bkg = std.vector('int')()
-#nHitStrip_bkg = std.vector('int')() # Background Track variables
-#nHitTIB_bkg     = std.vector('int')()
-#nHitTID_bkg     = std.vector('int')()
-#nHitTOB_bkg     = std.vector('int')()
-#nHitTEC_bkg     = std.vector('int')()
-#nHitPXB_bkg     = std.vector('int')()
-#nHitPXF_bkg     = std.vector('int')()
-#isHitL1_bkg     = std.vector('int')()
-#nSiLayers_bkg   = std.vector('int')()
-#nPxLayers_bkg   = std.vector('int')()
-
+nGV      = std.vector('int')()
 had_GVx  = std.vector('double')()
 had_GVy  = std.vector('double')()
 had_GVz  = std.vector('double')()
+GV_flag  = std.vector('int')()
 
-outtree.Branch("had_GVx", had_GVx)
-outtree.Branch("had_GVy", had_GVy)
-outtree.Branch("had_GVz", had_GVz)
 
-outtree.Branch("ip2d", ip2d)
-outtree.Branch("ip3d", ip3d)
-outtree.Branch("ip2dsig", ip2dsig)
-outtree.Branch("ip3dsig", ip3dsig)
-outtree.Branch("p", p)
-outtree.Branch("pt", pt)
-outtree.Branch("eta", eta)
-outtree.Branch("phi", phi)
-outtree.Branch("charge", charge)
+outtree.Branch("flag", flag)
+outtree.Branch("flav", flav)
+outtree.Branch("ind", ind)
+
+
 
 #outtree.Branch("chi2", chi2)
 #outtree.Branch("nHitAll", nHitAll)
@@ -109,18 +87,25 @@ def delta_R(eta1, phi1, eta2, phi2):
     dphi = delta_phi(phi1, phi2)
     return math.sqrt(deta**2 + dphi**2)
 
+def top_n_indices(arrays, n):
+    combined = np.vstack(arrays).T  # Combine arrays into a 2D array with shape (num_elements, num_arrays)
+    combined_metric = np.sum(np.abs(combined), axis=1)  # You can change this to any other metric
+    return np.argsort(combined_metric)[-n:][::-1]
+
+
+def numpy_to_std_vector(np_array):
+    vec = std.vector('int')()
+    for item in np_array:
+        vec.push_back(int(item))
+    return vec
+
 for i, evt in enumerate(tree):
     if(i >= int(args.start) and i <= int(args.end)-1):
         print("Processing event:", i)
-        ip2d.clear()
-        ip3d.clear()
-        ip2dsig.clear()
-        ip3dsig.clear()
-        p.clear()
-        pt.clear()
-        eta.clear()
-        phi.clear()
-        charge.clear()
+        ind.clear()
+        flag.clear()
+        flav.clear()
+
         #chi2.clear()
         #charge.clear()
         #nHitAll.clear()
@@ -135,26 +120,66 @@ for i, evt in enumerate(tree):
         #isHitL1.clear()
         #nSiLayers.clear()
         #nPxLayers.clear()
-        had_GVx.clear()
-        had_GVy.clear()
-        had_GVz.clear()
+       
+        #ngvs = 0
+        
+        
+        #for bd in range(len(evt.Hadron_GVx)):
+        #    had_GVx.push_back(evt.Hadron_GVx[bd])
+        #    had_GVy.push_back(evt.Hadron_GVy[bd])
+        #    had_GVz.push_back(evt.Hadron_GVz[bd])
+        #    GV_flag.push_back(evt.GV_flag[bd])
+        #    ngvs+=1
 
-        for bd in range(len(evt.Hadron_GVx)):
-            had_GVx.push_back(evt.Hadron_GVx[bd])
-            had_GVy.push_back(evt.Hadron_GVy[bd])
-            had_GVz.push_back(evt.Hadron_GVz[bd])
+        nds = sum(evt.nDaughters)
 
+        #t_pt = evt.trk_pt
+        #t_ip2d = evt.trk_ip2d
+        #t_ip3d = evt.trk_ip3d
 
-        for trk in range(evt.nTrks[0]):
-            ip2d.push_back(evt.trk_ip2d[trk])
-            ip3d.push_back(evt.trk_ip3d[trk])
-            ip2dsig.push_back(evt.trk_ip2dsig[trk])
-            ip3dsig.push_back(evt.trk_ip3dsig[trk])
-            #p.push_back(evt.trk_p[trk])
-            pt.push_back(evt.trk_pt[trk])
-            eta.push_back(evt.trk_eta[trk])
-            phi.push_back(evt.trk_phi[trk])
-            charge.push_back(evt.trk_charge[trk])
+        #t_ip2d = [x if -20 < x < 20 else 0 for x in t_ip2d]
+
+        #t_ip3d = [x if -40 < x < 40 else 0 for x in t_ip3d]
+
+        #t_ip2dsig = evt.trk_ip2dsig
+        #t_ip3dsig = evt.trk_ip3dsig
+
+        #n = ngvs*3
+
+        #top_indices = top_n_indices([t_ip2d,t_ip3d], n)
+        #
+        #top_ind.push_back(numpy_to_std_vector(top_indices))
+
+        tinds = []
+         
+
+        if(nds>0):
+            for d in range(nds):
+                trk_mindr = 1e6
+                trk_flag = -1
+                trk_flav = -1
+                trk_ptrat = -1
+                tind = -1
+                for trk in range(evt.nTrks[0]):
+                    #if(trk in tinds): continue
+                    if(evt.trk_charge[trk] != evt.Daughters_charge[d]): continue
+                    if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
+                    delR = delta_R(evt.trk_eta[trk], evt.trk_phi[trk], evt.Daughters_eta[d], evt.Daughters_phi[d]) 
+                    temp_ptrat = (evt.trk_pt[trk])/(evt.Daughters_pt[d])
+                    if (delR <= trk_mindr and delR< 0.02 and temp_ptrat > 0.8 and temp_ptrat < 1.2):
+                         trk_mindr = delR
+                         trk_ptrat = temp_ptrat
+                         tind = trk
+
+                
+                if(trk_ptrat > 0):
+                    trk_flag = evt.Daughters_flag[d] #Which hadron it comes from
+                    trk_flav = evt.Daughters_flav[d]
+                    ind.push_back(tind)
+                    flag.push_back(trk_flag)
+                    flav.push_back(trk_flav)
+                    tinds.append(tind)
+                    
 
         outtree.Fill()
 

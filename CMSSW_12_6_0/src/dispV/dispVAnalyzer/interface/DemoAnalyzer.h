@@ -24,6 +24,7 @@
 #include "DataFormats/PatCandidates/interface/PATObject.h"
 #include "DataFormats/PatCandidates/interface/PackedCandidate.h"
 #include "DataFormats/Candidate/interface/Candidate.h"
+#include "DataFormats/Candidate/interface/VertexCompositePtrCandidate.h"
 #include "DataFormats/HepMCCandidate/interface/GenParticle.h"
 #include "DataFormats/JetReco/interface/PFJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
@@ -73,11 +74,13 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
       edm::EDGetTokenT<pat::PackedCandidateCollection> TrackCollT_;
       edm::EDGetTokenT<reco::VertexCollection> PVCollT_;
+      edm::EDGetTokenT<edm::View<reco::VertexCompositePtrCandidate>> SVCollT_;
       edm::EDGetTokenT<pat::PackedCandidateCollection> LostTrackCollT_;
       edm::EDGetTokenT<edm::View<reco::Jet> > jet_collT_;
       edm::EDGetTokenT<edm::View<reco::GenParticle> > prunedGenToken_;
       edm::EDGetTokenT<edm::View<pat::PackedGenParticle> > packedGenToken_;
-      
+      edm::EDGetTokenT<edm::View<reco::GenParticle> > mergedGenToken_;
+
       TTree *tree;
       double TrackPtCut_;
 
@@ -100,6 +103,7 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<int> nDaughters_B;
       std::vector<int> nDaughters_D;
       std::vector<int> Daughters_flag;
+      std::vector<int> Daughters_flav;
       std::vector<float> Daughters_pt;
       std::vector<float> Daughters_eta;
       std::vector<float> Daughters_phi;
@@ -110,15 +114,27 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<float> trk_ip3d;
       std::vector<float> trk_ip2dsig;
       std::vector<float> trk_ip3dsig;
+      std::vector<float> trk_p;
       std::vector<float> trk_pt;
       std::vector<float> trk_eta;
       std::vector<float> trk_phi;
       std::vector<float> trk_charge;
-
+      std::vector<int> trk_nValid;
+      std::vector<int> trk_nValidPixel;
+      std::vector<int> trk_nValidStrip;
+      
       std::vector<int> njets;
       std::vector<float> jet_pt;
       std::vector<float> jet_eta;
       std::vector<float> jet_phi;
+
+      std::vector<int> nSVs;
+      std::vector<float> SV_x;
+      std::vector<float> SV_y;
+      std::vector<float> SV_z;
+      std::vector<float> SV_pt;
+      std::vector<float> SV_mass;
+      std::vector<int> SV_ntrks;
 
 };
 

@@ -27,10 +27,12 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig):
 	theTTBToken(esConsumes(edm::ESInputTag("", "TransientTrackBuilder"))),
 	TrackCollT_ (consumes<pat::PackedCandidateCollection>(iConfig.getUntrackedParameter<edm::InputTag>("tracks"))),
 	PVCollT_ (consumes<reco::VertexCollection>(iConfig.getUntrackedParameter<edm::InputTag>("primaryVertices"))),
+	SVCollT_ (consumes<edm::View<reco::VertexCompositePtrCandidate>>(iConfig.getUntrackedParameter<edm::InputTag>("secVertices"))),
   	LostTrackCollT_ (consumes<pat::PackedCandidateCollection>(iConfig.getUntrackedParameter<edm::InputTag>("losttracks"))),
 	jet_collT_ (consumes<edm::View<reco::Jet> >(iConfig.getUntrackedParameter<edm::InputTag>("jets"))),
 	prunedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("pruned"))),
   	packedGenToken_(consumes<edm::View<pat::PackedGenParticle> >(iConfig.getParameter<edm::InputTag>("packed"))),
+	mergedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("merged"))),
 	TrackPtCut_(iConfig.getUntrackedParameter<double>("TrackPtCut")),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo")))
 {
@@ -118,6 +120,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   nDaughters_B.clear();
   nDaughters_D.clear();
   Daughters_flag.clear();
+  Daughters_flav.clear();
   Daughters_pt.clear();
   Daughters_eta.clear();
   Daughters_phi.clear();
@@ -128,15 +131,27 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   trk_ip3d.clear();
   trk_ip2dsig.clear();
   trk_ip3dsig.clear();
+  trk_p.clear();
   trk_pt.clear();
   trk_eta.clear();
   trk_phi.clear();
   trk_charge.clear();
+  trk_nValid.clear();
+  trk_nValidPixel.clear();
+  trk_nValidStrip.clear();
 
   njets.clear();
   jet_pt.clear();
   jet_eta.clear();
   jet_phi.clear();
+
+  nSVs.clear();
+  SV_x.clear();
+  SV_y.clear();
+  SV_z.clear();
+  SV_pt.clear();
+  SV_mass.clear();
+  SV_ntrks.clear();
 
 
   Handle<PackedCandidateCollection> patcan;
@@ -144,7 +159,9 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   Handle<edm::View<reco::Jet> > jet_coll;
   Handle<edm::View<reco::GenParticle> > pruned;
   Handle<edm::View<pat::PackedGenParticle> > packed;
+  Handle<edm::View<reco::GenParticle> > merged;
   Handle<reco::VertexCollection> pvHandle;
+  Handle<edm::View<reco::VertexCompositePtrCandidate>> svHandle ;
   Handle<std::vector< PileupSummaryInfo > > PupInfo;
 
   std::vector<reco::Track> alltracks;
@@ -154,10 +171,18 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   iEvent.getByToken(jet_collT_, jet_coll);
   iEvent.getByToken(prunedGenToken_,pruned);
   iEvent.getByToken(packedGenToken_,packed);
+  iEvent.getByToken(mergedGenToken_, merged);
   iEvent.getByToken(PVCollT_, pvHandle);
+  iEvent.getByToken(SVCollT_, svHandle);
+
+  //std::cout<<"Merged size:"<<merged->size()<<std::endl;
+  //std::cout<<"Packed size:"<<packed->size()<<std::endl;
+  //std::cout<<"Pruned size:"<<pruned->size()<<std::endl;
 
   const auto& theB = &iSetup.getData(theTTBToken);
   reco::Vertex pv = (*pvHandle)[0];
+
+
 
   GlobalVector direction(1,0,0);
   direction = direction.unit();
@@ -174,11 +199,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    }
 
+
   for (auto const& itrack : *patcan){
        if (itrack.trackHighPurity() && itrack.hasTrackDetails()){
            reco::Track tmptrk = itrack.pseudoTrack();
            if (tmptrk.quality(reco::TrackBase::highPurity) && tmptrk.pt()> TrackPtCut_ && tmptrk.charge()!=0){
-               alltracks.push_back(tmptrk);
+	       alltracks.push_back(tmptrk);
            }
        }
    }
@@ -192,14 +218,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
        }
    }
 
-   int njet = 0;
-   for (auto const& ijet: *jet_coll){
-   	jet_pt.push_back(ijet.pt());
-	jet_eta.push_back(ijet.eta());
-	jet_phi.push_back(ijet.phi());
-	njet++;
-   }
-   njets.push_back(njet);
+   //int njet = 0;
+   //for (auto const& ijet: *jet_coll){
+   //	jet_pt.push_back(ijet.pt());
+   //     jet_eta.push_back(ijet.eta());
+   //     jet_phi.push_back(ijet.phi());
+   //     njet++;
+   //}
+   //njets.push_back(njet);
    
    int ntrk = 0;
    for (const auto& track : alltracks) {
@@ -212,10 +238,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	trk_ip3d.push_back(ip3d.value());
 	trk_ip2dsig.push_back(ip2d.significance());
 	trk_ip3dsig.push_back(ip3d.significance());
+	trk_p.push_back(track.p());
 	trk_pt.push_back(track.pt());
 	trk_eta.push_back(track.eta());
 	trk_phi.push_back(track.phi());
 	trk_charge.push_back(track.charge());
+	trk_nValid.push_back(track.numberOfValidHits());
+	trk_nValidPixel.push_back(track.hitPattern().numberOfValidPixelHits());
+	trk_nValidStrip.push_back(track.hitPattern().numberOfValidStripHits());
 	ntrk++;
    }
    ntrks.push_back(ntrk);
@@ -232,9 +262,16 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<float> temp_Daughters_phi;
    std::vector<int> temp_Daughters_charge;
    std::vector<int> temp_Daughters_flag;
-   for(size_t i=0; i< pruned->size();i++)
+   std::vector<int> temp_Daughters_flav;
+   for(size_t i=0; i< merged->size();i++)
    { //prune loop
-	const Candidate * prun_part = &(*pruned)[i];
+	temp_Daughters_pt.clear();
+        temp_Daughters_eta.clear();
+        temp_Daughters_phi.clear();
+        temp_Daughters_charge.clear();
+        temp_Daughters_flag.clear();
+        temp_Daughters_flav.clear();
+	const Candidate * prun_part = &(*merged)[i];
 	if(!(prun_part->pt() > 10 && std::abs(prun_part->eta()) < 2.5)) continue;
 	int hadPDG = checkPDG(std::abs(prun_part->pdgId()));
 	int had_parPDG = checkPDG(std::abs(prun_part->mother(0)->pdgId()));
@@ -250,10 +287,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
                 float vy = std::numeric_limits<float>::quiet_NaN();
                 float vz = std::numeric_limits<float>::quiet_NaN();
 
-		for(size_t j=0; j< packed->size(); j++){
-			const Candidate *pack =  &(*packed)[j];
-			if(!(pack->pt() > 1 && std::abs(pack->eta()) < 2.5 && std::abs(pack->charge()) > 0)) continue;
-                        const Candidate * mother = pack->mother(0);
+		for(size_t j=0; j< merged->size(); j++){
+			const Candidate *pack =  &(*merged)[j];
+			if(pack==prun_part) continue;
+			if(!(pack->status()==1 && pack->pt() > 0.8 && std::abs(pack->eta()) < 2.5 && std::abs(pack->charge()) > 0)) continue;
+			//const Candidate * mother = pack->mother(0);
+			const Candidate * mother = pack;
                         if(mother != nullptr)
                         {
                                 auto GV = isAncestor(prun_part, mother);
@@ -266,7 +305,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             					temp_Daughters_eta.push_back(pack->eta());
             					temp_Daughters_phi.push_back(pack->phi());
             					temp_Daughters_charge.push_back(pack->charge());
-            					temp_Daughters_flag.push_back(i);
+            					temp_Daughters_flag.push_back(ngv); //Hadron index
+						temp_Daughters_flav.push_back(hadPDG); //Hadron flav
 						
 					}
 						
@@ -284,14 +324,15 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 			        Hadron_GVx.push_back(vx);
                 	        Hadron_GVy.push_back(vy); 
                 	        Hadron_GVz.push_back(vz); 
-                	        GV_flag.push_back(hadPDG);	
-			        addedGV = true;
+                	        GV_flag.push_back(nhads-1); //Which hadron it belongs to
+				addedGV = true;
 			}
 			Daughters_pt.insert(Daughters_pt.end(), temp_Daughters_pt.begin(), temp_Daughters_pt.end());
                 	Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
                 	Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
                 	Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
                 	Daughters_flag.insert(Daughters_flag.end(), temp_Daughters_flag.begin(), temp_Daughters_flag.end());
+			Daughters_flav.insert(Daughters_flav.end(), temp_Daughters_flav.begin(), temp_Daughters_flav.end());
 			nd = nPack;
 			if(hadPDG==1) nd_b = nd;
 			if(hadPDG==2) nd_d = nd;
@@ -300,14 +341,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    			nDaughters_B.push_back(nd_b);
    			nDaughters_D.push_back(nd_d);
 
-                	// Clear the temporary vectors
-                	temp_Daughters_pt.clear();
-                	temp_Daughters_eta.clear();
-                	temp_Daughters_phi.clear();
-                	temp_Daughters_charge.clear();
-                	temp_Daughters_flag.clear();
-
-		}
+   		}
 	} //if pdg
 
    } //prune loop
@@ -316,6 +350,20 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    nGV.push_back(ngv);
    nGV_B.push_back(ngv_b);
    nGV_D.push_back(ngv_d);
+
+
+   int nsvs = 0;
+   for(const auto &sv: *svHandle){
+	nsvs++;
+   	SV_x.push_back(sv.vertex().x());
+	SV_y.push_back(sv.vertex().y());
+	SV_z.push_back(sv.vertex().z());
+	SV_pt.push_back(sv.pt());
+	SV_mass.push_back(sv.p4().M());
+	SV_ntrks.push_back(sv.numberOfSourceCandidatePtrs());
+   }
+   nSVs.push_back(nsvs);
+
 
    tree->Fill();
 
@@ -339,6 +387,7 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("nDaughters_B", &nDaughters_B);
 	tree->Branch("nDaughters_D", &nDaughters_D);
 	tree->Branch("Daughters_flag", &Daughters_flag);
+	tree->Branch("Daughters_flav", &Daughters_flav);
 	tree->Branch("Daughters_pt", &Daughters_pt);
 	tree->Branch("Daughters_eta", &Daughters_eta);
 	tree->Branch("Daughters_phi", &Daughters_phi);
@@ -349,15 +398,27 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("trk_ip3d", &trk_ip3d);
 	tree->Branch("trk_ip2dsig", &trk_ip2dsig);
         tree->Branch("trk_ip3dsig", &trk_ip3dsig);
+	tree->Branch("trk_p", &trk_p);
 	tree->Branch("trk_pt", &trk_pt);
 	tree->Branch("trk_eta", &trk_eta);
 	tree->Branch("trk_phi", &trk_phi);
+	tree->Branch("trk_nValid", &trk_nValid);
+	tree->Branch("trk_nValidPixel", &trk_nValidPixel);
+	tree->Branch("trk_nValidStrip", &trk_nValidStrip);
 	tree->Branch("trk_charge", &trk_charge);
 
 	tree->Branch("nJets", &njets);
 	tree->Branch("jet_pt", &jet_pt);
         tree->Branch("jet_eta", &jet_eta);
         tree->Branch("jet_phi", &jet_phi);
+
+	tree->Branch("nSVs", &nSVs);
+	tree->Branch("SV_x", &SV_x);
+	tree->Branch("SV_y", &SV_y);
+	tree->Branch("SV_z", &SV_z);
+	tree->Branch("SV_pt", &SV_pt);
+	tree->Branch("SV_mass", &SV_mass);
+	tree->Branch("SV_ntrks", &SV_ntrks);
 
 }
 

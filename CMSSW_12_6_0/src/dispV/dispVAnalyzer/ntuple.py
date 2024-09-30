@@ -3,7 +3,7 @@ import argparse
 gStyle.SetOptStat(0)
 gROOT.SetBatch(1)
 
-infile = "testout_1107.root"
+infile = "testout_1507.root"
 Infile = TFile(infile, 'READ')
 demo = Infile.Get('demo')
 tree = demo.Get('tree')
@@ -37,7 +37,7 @@ for event in tree:
             if(d>0): nD_D.Fill(d)
 
 
-saveFile = TFile("hists_TTToHadronic_2018UL.root", "RECREATE")
+saveFile = TFile("hists_TTToHadronic_2018UL_merged.root", "RECREATE")
 saveFile.WriteObject(nGV, "nGV")
 saveFile.WriteObject(nGV_B, "nGV_B")
 saveFile.WriteObject(nGV_D, "nGV_D")
