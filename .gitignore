@@ -4,6 +4,8 @@
 *.json
 *.pb
 *.csv
+*.pth
+*.pkl
 CMSSW_12_6_0/biglib
 CMSSW_12_6_0/cfipython
 CMSSW_12_6_0/doc
