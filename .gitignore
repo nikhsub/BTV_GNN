@@ -26,8 +26,8 @@ ML_scripts/pics
 IVF/files
 IVF/files_models
 IVF/__pycache__
-RandlaMod/
+RandlaMod/files
+RandlaMod/files_models
 CMSSW_12_6_0/src/analysis/.trkinfo.py.swp
 IVF/files/*.pkl
 IVF/files_models/*.pth
-
