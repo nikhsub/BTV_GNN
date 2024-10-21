@@ -1,29 +1,39 @@
 import ROOT
 from collections import Counter
 
-infile = "ntup_0908_dup.root"
+infile = "label_2l_0210.root"
 Infile = ROOT.TFile(infile, 'READ')
 
 tree = Infile.Get('tree')
 
 for i, evt in enumerate(tree):
     print("EVENT: ", i)
-    print("#GVs:", evt.nGV[0])
-    print("#Trks:", len(evt.p))
-    print("Flag", evt.flag)
-    print("Flav", evt.flav)
+    #print("#GVs:", evt.nGV[0])
+    #print("#Trks:", len(evt.p))
+    #print("Flag", evt.flag)
+    #print("Flav", evt.flav)
+    #print("Ind", len(set(evt.ind)))
+#    print("Seed_ind", evt.seed_ind)
+    set_ind = set(evt.ind)
+    set_seed_ind = set(evt.seed_ind)
 
-    GVflag = evt.flag
-    GV_hadcounter = Counter(GVflag)
-    #
-    #dflag = evt.Daughters_flag
-    #dcounter = Counter(dflag)
+    # Find common elements
+    common_elements = set_ind.intersection(set_seed_ind)
+    
+    # Print common elements
+    print("Diff Common elements:", len(set(evt.ind))-len(common_elements))
 
-    gvcount_dict = {i+1: GV_hadcounter[i] for i in range(evt.nGV[0])}
-    #dcount_dict = {i+1: dcounter[i] for i in range(evt.nGV[0])}
+    #GVflag = evt.flag
+    #GV_hadcounter = Counter(GVflag)
+    ##
+    ##dflag = evt.Daughters_flag
+    ##dcounter = Counter(dflag)
 
-    for category, count in gvcount_dict.items():
-        print(f"GV {category}: {count} tracks")
+    #gvcount_dict = {i+1: GV_hadcounter[i] for i in range(evt.nGV[0])}
+    ##dcount_dict = {i+1: dcounter[i] for i in range(evt.nGV[0])}
+
+    #for category, count in gvcount_dict.items():
+    #    print(f"GV {category}: {count} tracks")
 
 
     #for category, count in dcount_dict.items():

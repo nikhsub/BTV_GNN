@@ -27,8 +27,8 @@ tree = demo.Get('tree')
 Outfile = TFile(args.out+".root", "recreate")
 outtree = TTree("tree", "tree")
 
-
 ind       = std.vector('int')()
+seed_ind  = std.vector('int')()
 flag      = std.vector('int')()
 flav      = std.vector('int')()
 mindr     = std.vector('double')()
@@ -44,6 +44,7 @@ GV_flag  = std.vector('int')()
 outtree.Branch("flag", flag)
 outtree.Branch("flav", flav)
 outtree.Branch("ind", ind)
+outtree.Branch("seed_ind", seed_ind)
 
 
 
@@ -103,6 +104,7 @@ for i, evt in enumerate(tree):
     if(i >= int(args.start) and i <= int(args.end)-1):
         print("Processing event:", i)
         ind.clear()
+        seed_ind.clear()
         flag.clear()
         flav.clear()
 
@@ -161,6 +163,10 @@ for i, evt in enumerate(tree):
                 trk_ptrat = -1
                 tind = -1
                 for trk in range(evt.nTrks[0]):
+                    if(d==0):
+                        if(evt.trk_pt[trk] > 0.8 and abs(evt.trk_ip3d[trk]) > 0.005 and abs(evt.trk_ip2dsig[trk]) > 1.2):
+                            seed_ind.push_back(trk)
+
                     #if(trk in tinds): continue
                     if(evt.trk_charge[trk] != evt.Daughters_charge[d]): continue
                     if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
@@ -179,6 +185,8 @@ for i, evt in enumerate(tree):
                     flag.push_back(trk_flag)
                     flav.push_back(trk_flav)
                     tinds.append(tind)
+            
+
                     
 
         outtree.Fill()

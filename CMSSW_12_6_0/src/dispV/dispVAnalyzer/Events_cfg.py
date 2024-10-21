@@ -41,7 +41,7 @@ addPileupInfo = cms.untracked.InputTag('slimmedAddPileupInfo')
 )
 
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbar_2L_4000_1609.root"),
+        fileName = cms.string("ttbar_2l_4000_0210.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles+process.demo)

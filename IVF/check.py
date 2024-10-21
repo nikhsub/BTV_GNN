@@ -16,18 +16,24 @@ if args.load != "":
         evt_data = pickle.load(f)
 
 for i, data in enumerate(evt_data):
+    if(i==4):break
     print("EVENT", i)
-    print("Total tracks: ", data.x.size(0))
-    seed_tracks = data.seeds.nonzero(as_tuple=True)[0]
-    sig_tracks = (data.y.sum(dim=1) > 0).nonzero(as_tuple=True)[0]
-    print("Seed tracks", seed_tracks.size(0))
-    print("Signal tracks", sig_tracks.size(0))
-    
-    overlap_mask = torch.isin(seed_tracks, sig_tracks)
-    overlap_tracks = seed_tracks[overlap_mask]
-    overlap_count = overlap_tracks.size(0)
 
-    print(f"Number of overlapping tracks between seeds and signal: {overlap_count}")
+    print("LABELS", data.y)
+    print("DATA", data.x)
+    print("SEEDS", data.seeds)
+    
+    #print("Total tracks: ", data.x.size(0))
+    #seed_tracks = data.seeds.nonzero(as_tuple=True)[0]
+    #sig_tracks = (data.y.sum(dim=1) > 0).nonzero(as_tuple=True)[0]
+    #print("Seed tracks", seed_tracks.size(0))
+    #print("Signal tracks", sig_tracks.size(0))
+    #
+    #overlap_mask = torch.isin(seed_tracks, sig_tracks)
+    #overlap_tracks = seed_tracks[overlap_mask]
+    #overlap_count = overlap_tracks.size(0)
+
+    #print(f"Number of overlapping tracks between seeds and signal: {overlap_count}")
     print("NEXT")
 
 #tottrks = 0

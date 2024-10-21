@@ -24,25 +24,14 @@ class GNNModel(torch.nn.Module):
         self.gat1 = GATConv(outdim//4, outdim//4, heads=heads, concat=False)
 
         self.gcn2 = GCNConv(outdim//4, outdim//2)
-        self.gat2 = GATConv(outdim//2, outdim//4, heads=heads, concat=False)
+        self.gat2 = GATConv(outdim//2, outdim, heads=heads, concat=False)
 
-        self.gcn3 = GCNConv(outdim//4, outdim//2)
-        self.gat3 = GATConv(outdim//2, outdim//2, heads=heads, concat=False)
-
-        self.gcn4 = GCNConv(outdim//2, outdim)
-        self.gat4 = GATConv(outdim, outdim//2, heads=heads, concat=False)
-
-        self.gcn5 = GCNConv(outdim//2, outdim)
-        self.gat5 = GATConv(outdim, outdim, heads=heads, concat=False)
-
-        self.gcn6 = GCNConv(outdim, outdim)
-        self.gat6 = GATConv(outdim, outdim, heads=heads*2, concat=False)
-
-        catout = outdim//4+outdim//2+outdim
+        catout = outdim//4+outdim
 
         self.bn1 = nn.BatchNorm1d(outdim//4)
-        self.bn2 = nn.BatchNorm1d(outdim//2)
-        self.bn3 = nn.BatchNorm1d(outdim)
+        self.bn2 = nn.BatchNorm1d(outdim)
+        self.drop1 = nn.Dropout(p=0.2)
+        self.drop2 = nn.Dropout(p=0.25)
 
         # FC layer to predict edge probabilities
         self.edge_pred = nn.Sequential(
@@ -56,50 +45,31 @@ class GNNModel(torch.nn.Module):
                             nn.Sigmoid()
                          )
     
-    def forward(self, data, device, training):
+    def forward(self, data, device, training, thres=0.5):
 
         num_seeds = data.seeds.size(0)
-
+        
         x = self.nn1(data.x)
-        x = F.tanh(x)
+        x = F.leaky_relu(x)
 
-        edge_index = self.knn_update(data.x, data.seeds, num_seeds*3, device, False, training)
+        edge_index = self.knn_update(x, data.seeds, num_seeds, device, False, training)
 
         x1 = self.gcn1(x, edge_index)
         #x1 = F.leaky_relu(x1)
         x1 = self.gat1(x1, edge_index)
-        x1 = F.tanh(x1)
+        x1 = self.bn1(x1)
+        x1 = F.leaky_relu(x1)
+        x1 = self.drop1(x1)
 
-        x1 = self.gcn2(x1, edge_index)
-        x1 = self.gat2(x1, edge_index)
-        x1 = F.tanh(x1)
-        #x1 = self.bn1(x1)
+        x2 = self.gcn2(x1, edge_index)
+        x2 = self.gat2(x2, edge_index)
+        x2 = self.bn2(x2)
+        x2 = F.leaky_relu(x2)
+        x2 = self.drop1(x2)
 
-        edge_index = self.knn_update(x1, data.seeds, num_seeds*2 , device, False, training )
+        edge_index = self.knn_update(x1, data.seeds, num_seeds, device, False, training )
 
-        x2 = self.gcn3(x1, edge_index)
-        #x2 = F.leaky_relu(x2)
-        x2 = self.gat3(x2, edge_index)
-        x2 = F.tanh(x2)
-        #x2 = self.bn2(x2)
-
-        x2 = self.gcn4(x2, edge_index)
-        x2 = self.gat4(x2, edge_index)
-        x2 = F.tanh(x2)
-
-        edge_index = self.knn_update(x2, data.seeds, num_seeds*1 , device, False, training)
-
-        x3 = self.gcn5(x2, edge_index)
-        x3 = self.gat5(x3, edge_index)
-        x3 = F.tanh(x3)
-
-        #edge_index = self.knn_update(x3, data.seeds, num_seeds, device, False, training)
-
-        x4 = self.gcn6(x3, edge_index)
-        x4 = self.gat6(x4, edge_index)
-        x4 = F.tanh(x4)
-
-        xf = torch.cat((x1, x2, x4), dim=1)
+        xf = torch.cat((x1, x2), dim=1)
 
         edge_start = xf[edge_index[0]]
         edge_end   = xf[edge_index[1]]
