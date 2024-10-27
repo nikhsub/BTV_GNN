@@ -101,6 +101,8 @@ def create_dataobj(datatree, labeltree, trk_features, nevts=3):
             comb_inds = list(sig_inds) + bkg_inds
 
             feature_matrix = np.vstack([np.array([evt_features[feature][int(ind)] for ind in comb_inds])
+                            for feature in trk_features]).T
+
 
             had_nan_mask = ~np.isnan(feature_matrix).any(axis=1)
             feature_matrix = feature_matrix[had_nan_mask]
@@ -112,6 +114,13 @@ def create_dataobj(datatree, labeltree, trk_features, nevts=3):
 
             labels = np.zeros(len(sig_inds) + len(bkg_inds))
             labels[:len(sig_inds)] = 1
+
+            shuffled_inds = np.random.permutation(len(labels))
+
+            feature_matrix = feature_matrix[shuffled_inds]
+            labels = labels[shuffled_inds]
+            sig_inds = [shuffled_inds.tolist().index(i) for i in sig_inds]
+            bkg_inds = [shuffled_inds.tolist().index(i) for i in bkg_inds]
 
             #print("LABELS", labels)
             #print("SIGINDS", sig_inds)

@@ -1,7 +1,7 @@
 import warnings
 warnings.filterwarnings("ignore")
 
-
+import json
 import argparse
 import uproot
 import numpy as np
@@ -28,7 +28,7 @@ parser.add_argument("-lh", "--load_had", default="", help="Load training hadron 
 parser.add_argument("-le", "--load_evt", default="", help="Load validation event data from a file")
 
 args = parser.parse_args()
-glob_test_thres = 0.9
+glob_test_thres = 0.6
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
@@ -43,7 +43,7 @@ if args.load_evt != "":
     with open(args.load_evt, 'rb') as f:
         val_data = pickle.load(f)
 
-train_hads = train_hads[:6000]
+train_hads = train_hads[:15000]
 val_data   = val_data[-10:]
 
 #SPLITTING, SCALING AND LOADING
@@ -94,8 +94,14 @@ def contrastive_loss(x1, x2, temperature=0.5):
 
     return loss
 
+def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
+    """Class-weighted binary cross-entropy loss"""
+    weights = torch.where(labels == 1, pos_weight, neg_weight)
+    bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
+    return bce_loss
+
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.5):
+def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3, scale=2):
 
     model.to(device)
     model.train()
@@ -123,7 +129,8 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.5
 
         cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)
 
-        node_loss = F.binary_cross_entropy(preds1, data.y.float().unsqueeze(1))
+        #node_loss = F.binary_cross_entropy(preds1, data.y.float().unsqueeze(1))
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*scale
 
         loss = cont_loss + node_loss
 
@@ -147,11 +154,13 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
     model.to(device)
     model.eval()
 
-    correct = 0
-    total = 0
+    correct_bkg = 0
+    total_bkg = 0
     correct_signal = 0
     total_signal = 0
     total_loss = 0
+    mean_sig_prob = []
+    mean_bkg_prob = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing", unit="Hadron"):
@@ -165,15 +174,20 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             batch_loss = F.binary_cross_entropy(preds, batch.y.float().unsqueeze(1))
             total_loss += batch_loss.item()
 
+            signal_mask = (batch.y == 1)  # Mask for signal nodes
+            background_mask = (batch.y == 0)
+
+            mean_sig_prob.append(preds[signal_mask].mean().item())
+            mean_bkg_prob.append(preds[background_mask].mean().item())
+
             preds = (preds > thres).float().squeeze()
 
-            correct += (preds == batch.y.float()).sum().item()
-            total += batch.num_nodes
-
             # Signal-specific accuracy
-            signal_mask = (batch.y == 1)  # Mask for signal nodes
             correct_signal += (preds[signal_mask] == batch.y[signal_mask].float()).sum().item()
             total_signal += signal_mask.sum().item()
+
+            correct_bkg += (preds[background_mask] == batch.y[background_mask].float()).sum().item()
+            total_bkg += background_mask.sum().item()
 
             #print(f"Predictions: {preds}")
             #print(f"True labels: {batch.y}")
@@ -181,24 +195,53 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             #print(f"Correct Signal: {correct_signal}, Total Signal: {total_signal}")
             #print(f"Correct total: {correct}, Total: {total}")
 
-    accuracy = correct / total if total > 0 else 0
-    signal_accuracy = correct_signal / total_signal if total_signal > 0 else 0
+    bkg_accuracy = correct_bkg / total_bkg if total_bkg > 0 else 0
+    sig_accuracy = correct_signal / total_signal if total_signal > 0 else 0
     avg_loss = total_loss / len(test_loader) if len(test_loader) > 0 else 0
 
-    return accuracy, signal_accuracy, avg_loss
+    #print("Mean signal probs per had", mean_sig_prob)
+    #print("Mean background probs per had", mean_bkg_prob)
+
+    return bkg_accuracy, sig_accuracy, avg_loss
 
 
 best_sig_acc = 0
-best_acc = 0
+best_bkg_acc = 0
 best_sum_acc = 0
+
+stats = {
+    "epochs": [],
+    "best_epoch": {
+        "epoch": None,
+        "total_loss": None,
+        "node_loss": None,
+        "cont_loss": None,
+        "bkg_acc": None,
+        "sig_acc": None,
+        "test_loss": None,
+        "total_acc": None
+    }
+}
 
 for epoch in range(int(args.epochs)):
     tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch)
-    acc, sig_acc, test_loss = test(model, test_loader,  device, epoch, thres=glob_test_thres)
-    sum_acc = acc + sig_acc
+    bkg_acc, sig_acc, test_loss = test(model, test_loader,  device, epoch, thres=glob_test_thres)
+    sum_acc = bkg_acc + sig_acc
+
+    epoch_stats = {
+        "epoch": epoch + 1,
+        "total_loss": tot_loss,
+        "node_loss": node_loss,
+        "cont_loss": cont_loss,
+        "bkg_acc": bkg_acc,
+        "sig_acc": sig_acc,
+        "test_loss": test_loss,
+        "total_acc": sum_acc
+    }
+    stats["epochs"].append(epoch_stats)
     
     print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Cont loss: {cont_loss:.4f}")
-    print(f"Total Acc: {acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
+    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
 
 
     if(epoch> 0 and epoch%10==0):
@@ -208,13 +251,28 @@ for epoch in range(int(args.epochs)):
 
     
     if sum_acc > best_sum_acc and epoch > 0: #and sig_prob > bkg_prob:
+        
+        stats["best_epoch"] = {
+            "epoch": epoch + 1,
+            "total_loss": tot_loss,
+            "node_loss": node_loss,
+            "cont_loss": cont_loss,
+            "bkg_acc": bkg_acc,
+            "sig_acc": sig_acc,
+            "test_loss": test_loss,
+            "total_acc": sum_acc
+        }
+
         save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
         torch.save(model.state_dict(), save_path)
         print(f"Model saved to {save_path}")
 
     if sig_acc > best_sig_acc: best_sig_acc = sig_acc
-    if acc > best_acc : best_acc = acc
+    if bkg_acc > best_bkg_acc : best_bkg_acc = bkg_acc
     if sum_acc > best_sum_acc: best_sum_acc = sum_acc
+
+    with open("training_stats_"+args.modeltag+".json", "w") as f:
+        json.dump(stats, f, indent=4)
 
 
 
