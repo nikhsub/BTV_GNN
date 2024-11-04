@@ -28,7 +28,7 @@ parser.add_argument("-lh", "--load_had", default="", help="Load training hadron 
 parser.add_argument("-le", "--load_evt", default="", help="Load validation event data from a file")
 
 args = parser.parse_args()
-glob_test_thres = 0.6
+glob_test_thres = 0.7
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
@@ -43,7 +43,7 @@ if args.load_evt != "":
     with open(args.load_evt, 'rb') as f:
         val_data = pickle.load(f)
 
-train_hads = train_hads[:15000]
+train_hads = train_hads[:]
 val_data   = val_data[-10:]
 
 #SPLITTING, SCALING AND LOADING
@@ -125,12 +125,14 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
         edge_index2 = drop_random_edges(edge_index, drop_rate)
         
         node_embeds1, preds1 = model(data, edge_index1, device)
-        node_embeds2, preds2 = model(data, edge_index2, device)
+        #node_embeds2, preds2 = model(data, edge_index2, device)
 
-        cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)
+        #cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)
+        cont_loss = torch.tensor(0.0, device=device)
 
         #node_loss = F.binary_cross_entropy(preds1, data.y.float().unsqueeze(1))
         node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*scale
+        #node_loss = torch.tensor(0.0, device=device) #Testing with only contloss
 
         loss = cont_loss + node_loss
 

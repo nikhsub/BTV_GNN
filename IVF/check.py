@@ -19,9 +19,12 @@ for i, data in enumerate(evt_data):
     if(i==10):break
     print("EVENT", i)
 
+    #print("LABELS", data.y)
+    print("DATA", data.x.size(0))
+    #print("SEEDS", data.seeds)
+    print("SIGINDS", data.seeds)
     print("LABELS", data.y)
-    #print("DATA", data.x)
-    print("SEEDS", data.seeds)
+    #print("SVINDS", data.svinds)
     
     #print("Total tracks: ", data.x.size(0))
     #seed_tracks = data.seeds.nonzero(as_tuple=True)[0]
