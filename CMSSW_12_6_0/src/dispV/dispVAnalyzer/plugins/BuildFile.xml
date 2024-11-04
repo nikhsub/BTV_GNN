@@ -8,6 +8,7 @@
 <use name="DataFormats/JetReco"/>
 <use name="DataFormats/BTauReco"/>
 <use name="DataFormats/Math"/>
+<use name="DataFormats/VertexReco"/>
 <use name="DataFormats/Common"/>
 <use name="PhysicsTools/UtilAlgos"/>
 <use name="PhysicsTools/RecoUtils"/>

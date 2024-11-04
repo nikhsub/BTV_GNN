@@ -29,5 +29,9 @@ IVF/__pycache__
 RandlaMod/files
 RandlaMod/files_models
 CMSSW_12_6_0/src/analysis/.trkinfo.py.swp
+IVF/files/
 IVF/files/*.pkl
-IVF/files_models/*.pth
+IVF/model_files
+IVF/__pycache__
+IVF/stats
+IVF/scaler

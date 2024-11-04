@@ -152,7 +152,9 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SV_pt.clear();
   SV_mass.clear();
   SV_ntrks.clear();
-
+  SVtrk_pt.clear();
+  SVtrk_eta.clear();
+  SVtrk_phi.clear();
 
   Handle<PackedCandidateCollection> patcan;
   Handle<PackedCandidateCollection> losttracks;
@@ -361,6 +363,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	SV_pt.push_back(sv.pt());
 	SV_mass.push_back(sv.p4().M());
 	SV_ntrks.push_back(sv.numberOfSourceCandidatePtrs());
+
+	for(size_t i =0; i < sv.numberOfSourceCandidatePtrs(); ++i){
+	    reco::CandidatePtr trackPtr = sv.sourceCandidatePtr(i);
+
+	    SVtrk_pt.push_back(trackPtr->pt());
+	    SVtrk_eta.push_back(trackPtr->eta());
+	    SVtrk_phi.push_back(trackPtr->phi());
+	}
    }
    nSVs.push_back(nsvs);
 
@@ -419,7 +429,9 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("SV_pt", &SV_pt);
 	tree->Branch("SV_mass", &SV_mass);
 	tree->Branch("SV_ntrks", &SV_ntrks);
-
+	tree->Branch("SVtrk_pt", &SVtrk_pt);
+	tree->Branch("SVtrk_eta", &SVtrk_eta);
+	tree->Branch("SVtrk_phi", &SVtrk_phi);
 }
 
 

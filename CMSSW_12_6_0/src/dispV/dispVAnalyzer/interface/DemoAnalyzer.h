@@ -135,6 +135,9 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<float> SV_pt;
       std::vector<float> SV_mass;
       std::vector<int> SV_ntrks;
+      std::vector<float> SVtrk_pt;
+      std::vector<float> SVtrk_eta;
+      std::vector<float> SVtrk_phi; 
 
 };
 

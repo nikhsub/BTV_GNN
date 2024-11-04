@@ -1,7 +1,7 @@
 import ROOT
 from collections import Counter
 
-infile = "label_2l_0210.root"
+infile = "testcondorlabel.root"
 Infile = ROOT.TFile(infile, 'READ')
 
 tree = Infile.Get('tree')
@@ -10,18 +10,17 @@ for i, evt in enumerate(tree):
     print("EVENT: ", i)
     #print("#GVs:", evt.nGV[0])
     #print("#Trks:", len(evt.p))
-    #print("Flag", evt.flag)
-    #print("Flav", evt.flav)
-    #print("Ind", len(set(evt.ind)))
+    print("Sig Ind", set(evt.sig_ind))
+    print("SV trk ind", evt.SVtrk_ind)
 #    print("Seed_ind", evt.seed_ind)
-    set_ind = set(evt.ind)
-    set_seed_ind = set(evt.seed_ind)
+    #set_ind = set(evt.ind)
+    #set_seed_ind = set(evt.seed_ind)
 
     # Find common elements
-    common_elements = set_ind.intersection(set_seed_ind)
+    #common_elements = set_ind.intersection(set_seed_ind)
     
     # Print common elements
-    print("Diff Common elements:", len(set(evt.ind))-len(common_elements))
+    #print("Diff Common elements:", len(set(evt.ind))-len(common_elements))
 
     #GVflag = evt.flag
     #GV_hadcounter = Counter(GVflag)
