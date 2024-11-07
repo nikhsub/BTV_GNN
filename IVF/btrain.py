@@ -19,16 +19,16 @@ import torch.nn.functional as F
 import math
 from conmodel import *
 import joblib
+from sklearn.metrics import roc_auc_score
 
 parser = argparse.ArgumentParser("GNN training")
 
 parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
 parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
 parser.add_argument("-lh", "--load_had", default="", help="Load training hadron data from a file")
-parser.add_argument("-le", "--load_evt", default="", help="Load validation event data from a file")
 
 args = parser.parse_args()
-glob_test_thres = 0.7
+glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
@@ -38,13 +38,7 @@ if args.load_had != "":
     with open(args.load_had, 'rb') as f:
         train_hads = pickle.load(f)
 
-if args.load_evt != "":
-    print(f"Loading validation data from {args.load_evt}...")
-    with open(args.load_evt, 'rb') as f:
-        val_data = pickle.load(f)
-
 train_hads = train_hads[:]
-val_data   = val_data[-10:]
 
 #SPLITTING, SCALING AND LOADING
 def scale_data(data_list, scaler):
@@ -66,7 +60,6 @@ test_data = scale_data(test_data, scaler)
 
 train_loader = DataLoader(train_data, batch_size=1, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
-val_loader  = DataLoader(val_data, batch_size=1, shuffle=False)
 
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -122,7 +115,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
         edge_index = torch.combinations(torch.arange(num_nodes), r=2).t().to(device)
 
         edge_index1 = drop_random_edges(edge_index, drop_rate)
-        edge_index2 = drop_random_edges(edge_index, drop_rate)
+        #edge_index2 = drop_random_edges(edge_index, drop_rate)
         
         node_embeds1, preds1 = model(data, edge_index1, device)
         #node_embeds2, preds2 = model(data, edge_index2, device)
@@ -163,15 +156,25 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
     total_loss = 0
     mean_sig_prob = []
     mean_bkg_prob = []
+    all_preds = []
+    all_labels = []
+    nosigtest = 0
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing", unit="Hadron"):
             batch = batch.to(device)
             num_nodes = batch.x.size(0)
 
+            if(batch.seeds.size(0) < 1):
+                nosigtest+=1
+                continue
+
             edge_index = knn_graph(batch.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
 
             _, preds = model(batch, edge_index, device)
+
+            all_preds.extend(preds.squeeze().cpu().numpy())
+            all_labels.extend(batch.y.cpu().numpy())
 
             batch_loss = F.binary_cross_entropy(preds, batch.y.float().unsqueeze(1))
             total_loss += batch_loss.item()
@@ -200,16 +203,15 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
     bkg_accuracy = correct_bkg / total_bkg if total_bkg > 0 else 0
     sig_accuracy = correct_signal / total_signal if total_signal > 0 else 0
     avg_loss = total_loss / len(test_loader) if len(test_loader) > 0 else 0
-
+    auc = roc_auc_score(all_labels, all_preds)
+    print(f"No sig hadrons test sample: {nosigtest}")
     #print("Mean signal probs per had", mean_sig_prob)
     #print("Mean background probs per had", mean_bkg_prob)
 
-    return bkg_accuracy, sig_accuracy, avg_loss
+    return bkg_accuracy, sig_accuracy, avg_loss, auc
 
 
-best_sig_acc = 0
-best_bkg_acc = 0
-best_sum_acc = 0
+best_auc = 0
 
 stats = {
     "epochs": [],
@@ -218,6 +220,7 @@ stats = {
         "total_loss": None,
         "node_loss": None,
         "cont_loss": None,
+        "auc": None,
         "bkg_acc": None,
         "sig_acc": None,
         "test_loss": None,
@@ -227,7 +230,7 @@ stats = {
 
 for epoch in range(int(args.epochs)):
     tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch)
-    bkg_acc, sig_acc, test_loss = test(model, test_loader,  device, epoch, thres=glob_test_thres)
+    bkg_acc, sig_acc, test_loss, auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
     sum_acc = bkg_acc + sig_acc
 
     epoch_stats = {
@@ -235,6 +238,7 @@ for epoch in range(int(args.epochs)):
         "total_loss": tot_loss,
         "node_loss": node_loss,
         "cont_loss": cont_loss,
+        "auc": auc,
         "bkg_acc": bkg_acc,
         "sig_acc": sig_acc,
         "test_loss": test_loss,
@@ -242,8 +246,8 @@ for epoch in range(int(args.epochs)):
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Cont loss: {cont_loss:.4f}")
-    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}")
+    print(f"AUC: {auc:.4f}, Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
 
 
     if(epoch> 0 and epoch%10==0):
@@ -252,7 +256,7 @@ for epoch in range(int(args.epochs)):
         print(f"Model saved to {savepath}")
 
     
-    if sum_acc > best_sum_acc and epoch > 0: #and sig_prob > bkg_prob:
+    if auc > best_auc and epoch > 0: #and sig_prob > bkg_prob:
         
         stats["best_epoch"] = {
             "epoch": epoch + 1,
@@ -260,6 +264,7 @@ for epoch in range(int(args.epochs)):
             "node_loss": node_loss,
             "cont_loss": cont_loss,
             "bkg_acc": bkg_acc,
+            "auc": auc,
             "sig_acc": sig_acc,
             "test_loss": test_loss,
             "total_acc": sum_acc
@@ -269,12 +274,8 @@ for epoch in range(int(args.epochs)):
         torch.save(model.state_dict(), save_path)
         print(f"Model saved to {save_path}")
 
-    if sig_acc > best_sig_acc: best_sig_acc = sig_acc
-    if bkg_acc > best_bkg_acc : best_bkg_acc = bkg_acc
-    if sum_acc > best_sum_acc: best_sum_acc = sum_acc
+    if auc > best_auc: best_auc = auc
 
     with open("training_stats_"+args.modeltag+".json", "w") as f:
         json.dump(stats, f, indent=4)
-
-
 

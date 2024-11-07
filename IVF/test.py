@@ -28,6 +28,8 @@ parser.add_argument("-ltr", "--load_train", default="", help="Load training data
 parser.add_argument("-lm",  "--load_model", default="", help="Load model file")
 parser.add_argument("-e",  "--event", default=False, action="store_true", help="Running on event?")
 parser.add_argument("-s", "--scaler", default="", help="Path to scaler file")
+parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
+parser.add_argument("-had", "--hadron", default=False, action="store_true", help="Testing on hadronic samples")
 
 args = parser.parse_args()
 
@@ -182,11 +184,15 @@ if(args.event):
     #plt.plot([0, 1], [0, 1], color='navy', linestyle='--')  # Diagonal line for random guessing
     plt.xlabel('Signal Accuracy')
     plt.ylabel('Background Mistag')
-    plt.title('ROC')
+
+    if (args.hadron): plt.title('ROC - Hadronic Events')
+    elif (not args.hadron): plt.title('ROC - Leptonic Events')
     plt.legend(loc='upper left')
     plt.yscale('log')  # Optional: Set y-axis to log scale if desired
     plt.grid()
-    plt.savefig(f"ROC_nod10kHad_0311_{i+1}lepevts.png")
+
+    if (args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}hadevts.png")
+    elif (not args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}lepevts.png")
     plt.close()
 
     #precision, recall, thresholds = precision_recall_curve(all_labels, all_preds)
