@@ -57,6 +57,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             valid_indices = np.where(nan_mask)[0]
 
             evtsiginds = list(set(sig_ind_array[evt]))
+            evtsigflags = [sig_flag_array[evt][sig_ind_array[evt].index(ind)] for ind in evtsiginds]
             evtbkginds = list(set(bkg_ind_array[evt]))
             evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
             evtsvinds = list(set(SV_ind_array[evt]))
@@ -66,12 +67,14 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             evtbkginds = [np.where(valid_indices == ind)[0][0] for ind in evtbkginds if ind in valid_indices]
             seeds      = [np.where(valid_indices == ind)[0][0] for ind in seeds if ind in valid_indices]
             evtsvinds  = [np.where(valid_indices == ind)[0][0] for ind in evtsvinds if ind in valid_indices]
+            evtsigflags = [flag for ind, flag in zip(sig_ind_array[evt], evtsigflags) if ind in valid_indices]
 
             evt_data = Data(
                 evt=evt,
                 seeds=torch.tensor(seeds, dtype=torch.int16),
                 x=torch.tensor(fullfeatmat, dtype=torch.float),
                 siginds=torch.tensor(evtsiginds, dtype=torch.int16),
+                sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
                 bkginds=torch.tensor(evtbkginds, dtype=torch.int16),
                 svinds=torch.tensor(evtsvinds, dtype=torch.int16)
             )

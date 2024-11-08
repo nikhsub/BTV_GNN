@@ -38,7 +38,7 @@ if args.load_had != "":
     with open(args.load_had, 'rb') as f:
         train_hads = pickle.load(f)
 
-train_hads = train_hads[:]
+train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
 
 #SPLITTING, SCALING AND LOADING
 def scale_data(data_list, scaler):
@@ -67,10 +67,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GNNModel(indim=len(trk_features), outdim=512)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
 
-def drop_random_edges(edge_index, drop_rate=0.2):
+def drop_random_edges(edge_index, drop_rate=0.2, device):
     """Randomly drop a percentage of edges from the graph"""
     num_edges = edge_index.size(1)
-    mask = torch.rand(num_edges) > drop_rate
+    mask = torch.rand(num_edges, device=device) > drop_rate
     return edge_index[:, mask]
 
 def contrastive_loss(x1, x2, temperature=0.5):
@@ -89,6 +89,10 @@ def contrastive_loss(x1, x2, temperature=0.5):
 
 def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
     """Class-weighted binary cross-entropy loss"""
+
+    pos_weight = torch.tensor(pos_weight, device=preds.device)
+    neg_weight = torch.tensor(neg_weight, device=preds.device)
+
     weights = torch.where(labels == 1, pos_weight, neg_weight)
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
@@ -104,20 +108,22 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
     nosigseeds = 0
 
     for data in tqdm(train_loader, desc="Training", unit="Hadron"):
+        data = data.to(device)
+
         if(data.seeds.size(0) < 3):
             nosigseeds+=1
             continue
         
-        data = data.to(device)
 
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
-        edge_index = torch.combinations(torch.arange(num_nodes), r=2).t().to(device)
+        edge_index = torch.combinations(torch.arange(num_nodes, device=device), r=2).t()
 
-        edge_index1 = drop_random_edges(edge_index, drop_rate)
+        edge_index1 = drop_random_edges(edge_index, drop_rate, device)
         #edge_index2 = drop_random_edges(edge_index, drop_rate)
         
         node_embeds1, preds1 = model(data, edge_index1, device)
+        assert preds1.device == device, f"preds1 is not on the device: {preds1.device}"
         #node_embeds2, preds2 = model(data, edge_index2, device)
 
         #cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)

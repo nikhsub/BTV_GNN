@@ -1,7 +1,7 @@
 import ROOT
 from collections import Counter
 
-infile = "testcondorlabel.root"
+infile = "newtest2.root"
 Infile = ROOT.TFile(infile, 'READ')
 
 tree = Infile.Get('tree')
@@ -9,7 +9,8 @@ tree = Infile.Get('tree')
 for i, evt in enumerate(tree):
     print("EVENT: ", i)
     #print("#GVs:", evt.nGV[0])
-    #print("#Trks:", len(evt.p))
+    print("#Trks:", len(evt.trk_p))
+    print("#Trks:", len(evt.trk_charge))
     print("Sig Ind", set(evt.sig_ind))
     print("SV trk ind", evt.SVtrk_ind)
 #    print("Seed_ind", evt.seed_ind)
