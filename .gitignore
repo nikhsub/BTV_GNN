@@ -22,6 +22,8 @@ CMSSW_12_6_0/lib
 CMSSW_12_6_0/objs
 CMSSW_12_6_0/test
 CMSSW_12_6_0/src/analysis/oldfiles
+CMSSW_12_6_0/src/dispV/dispVAnalyzer/__pycache__
+CMSSW_12_6_0/src/dispV/dispVAnalyzer/crab_projects
 ML_scripts/pics
 IVF/files
 IVF/files_models
