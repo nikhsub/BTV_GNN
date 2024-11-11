@@ -11,7 +11,6 @@ import random
 
 parser = argparse.ArgumentParser("Creating labels and seeds")
 parser.add_argument("-d", "--data", default="", help="Data file")
-parser.add_argument("-l", "--label", default="", help="Label file")
 parser.add_argument("-st", "--save_tag", default="", help="Save tag for data")
 parser.add_argument("-s", "--start", default=0, help="Evt # to start from")
 parser.add_argument("-e", "--end", default=4000, help="Evt # to end with")
@@ -24,20 +23,16 @@ trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'tr
 # Load entire dataset for all features in one go
 print("Loading files...")
 with uproot.open(args.data) as f:
-    demo = f['demo']
-    datatree = demo['tree']
-    
-with uproot.open(args.label) as f:
-    labeltree = f['tree']
+    datatree = f['tree']
 
 # Preload arrays for all events for faster access in loops
 trk_data = {feat: datatree[feat].array() for feat in trk_features}
-sig_ind_array = labeltree['sig_ind'].array()
-sig_flag_array = labeltree['sig_flag'].array()
-bkg_flag_array = labeltree['bkg_flag'].array()
-bkg_ind_array = labeltree['bkg_ind'].array()
-seed_array = labeltree['seed_ind'].array()
-SV_ind_array = labeltree['SVtrk_ind'].array()
+sig_ind_array = datatree['sig_ind'].array()
+sig_flag_array = datatree['sig_flag'].array()
+bkg_flag_array = datatree['bkg_flag'].array()
+bkg_ind_array = datatree['bkg_ind'].array()
+seed_array = datatree['seed_ind'].array()
+SV_ind_array = datatree['SVtrk_ind'].array()
 
 def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
                    seed_array, SV_ind_array, trk_features, nevts=3):
@@ -46,7 +41,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
     had_objects = []
 
     for evt in range(int(args.start), int(args.end)):
-        print("Processing event", evt)
+        print(evt)
         evt_features = {f: trk_data[f][evt] for f in trk_features}
         seeds = seed_array[evt]
 

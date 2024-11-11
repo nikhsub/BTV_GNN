@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser("GNN training")
 
 parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
 parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
-parser.add_argument("-lh", "--load_had", default="", help="Load training hadron data from a file")
+parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
 
 args = parser.parse_args()
 glob_test_thres = 0.5
@@ -33,30 +33,44 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
 #LOADING DATA
+train_hads = []
 if args.load_had != "":
-    print(f"Loading training data from {args.load_had}...")
-    with open(args.load_had, 'rb') as f:
-        train_hads = pickle.load(f)
+    if os.path.isdir(args.load_had):
+        print(f"Loading training data from {args.load_had}...")
+        pkl_files = [os.path.join(args.load_had, f) for f in os.listdir(args.load_had) if f.endswith('.pkl')]
+    for pkl_file in pkl_files:
+        print(f"Loading {pkl_file}...")
+        with open(pkl_file, 'rb') as f:
+            train_hads.extend(pickle.load(f))
 
 train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
 
 #SPLITTING, SCALING AND LOADING
-def scale_data(data_list, scaler):
-    for data in data_list:
-        data.x = torch.tensor(scaler.transform(data.x), dtype=torch.float)
-    return data_list
+#print("Scaling....")
+#def scale_data(data_list, scaler):
+#    for data in data_list:
+#        data.x = torch.tensor(scaler.transform(data.x), dtype=torch.float)
+#    return data_list
+
+def fit_scaler_on_subset(data_list, scaler, subset_size=1000):
+    random_indices = np.random.choice(len(data_list), size=min(subset_size, len(data_list)), replace=False)
+    subset_features = torch.cat([data_list[i].x for i in random_indices], dim=0).cpu().numpy()
+    scaler.fit(subset_features)
+    print(f"Fitted scaler on {len(subset_features)} samples (subset).")
+
+    return scaler
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
 
-scaler = StandardScaler()
-for data in train_data:
-    scaler.partial_fit(data.x)
+glob_scaler = StandardScaler()
 
-joblib.dump(scaler, 'scaler_'+args.modeltag+'.pkl')
+glob_scaler = fit_scaler_on_subset(train_data, glob_scaler, subset_size=10000)
 
-train_data = scale_data(train_data, scaler)
-test_data = scale_data(test_data, scaler)
+joblib.dump(glob_scaler, 'scaler_'+args.modeltag+'.pkl')
+
+#train_data = scale_data(train_data, scaler)
+#test_data = scale_data(test_data, scaler)
 
 train_loader = DataLoader(train_data, batch_size=1, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
@@ -67,7 +81,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = GNNModel(indim=len(trk_features), outdim=512)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
 
-def drop_random_edges(edge_index, drop_rate=0.2, device):
+def drop_random_edges(edge_index, drop_rate, device):
     """Randomly drop a percentage of edges from the graph"""
     num_edges = edge_index.size(1)
     mask = torch.rand(num_edges, device=device) > drop_rate
@@ -98,7 +112,7 @@ def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
     return bce_loss
 
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3, scale=2):
+def train(model, train_loader, optimizer, device, epoch, scaler, drop_rate=0.5, temp=0.3, scale=2):
 
     model.to(device)
     model.train()
@@ -114,7 +128,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
             nosigseeds+=1
             continue
         
-
+        data.x[:] = torch.tensor(scaler.transform(data.x.cpu()), dtype=torch.float).to(device)
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
         edge_index = torch.combinations(torch.arange(num_nodes, device=device), r=2).t()
@@ -123,7 +137,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
         #edge_index2 = drop_random_edges(edge_index, drop_rate)
         
         node_embeds1, preds1 = model(data, edge_index1, device)
-        assert preds1.device == device, f"preds1 is not on the device: {preds1.device}"
+        #assert preds1.device == device, f"preds1 is not on the device: {preds1.device}"
         #node_embeds2, preds2 = model(data, edge_index2, device)
 
         #cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)
@@ -151,7 +165,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
     return avg_loss, avg_node_loss, avg_cont_loss
 
 #TEST
-def test(model, test_loader, device, epoch, k=5, thres=0.5):
+def test(model, test_loader, device, epoch, scaler, k=5, thres=0.5):
     model.to(device)
     model.eval()
 
@@ -174,6 +188,8 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             if(batch.seeds.size(0) < 1):
                 nosigtest+=1
                 continue
+            
+            batch.x[:] = torch.tensor(scaler.transform(batch.x.cpu()), dtype=torch.float).to(device)
 
             edge_index = knn_graph(batch.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
 
@@ -235,8 +251,8 @@ stats = {
 }
 
 for epoch in range(int(args.epochs)):
-    tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch)
-    bkg_acc, sig_acc, test_loss, auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
+    tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, glob_scaler)
+    bkg_acc, sig_acc, test_loss, auc = test(model, test_loader,  device, epoch, glob_scaler,  thres=glob_test_thres)
     sum_acc = bkg_acc + sig_acc
 
     epoch_stats = {

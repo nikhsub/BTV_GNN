@@ -10,11 +10,14 @@ parser = argparse.ArgumentParser("Create track information root file")
 
 parser.add_argument("-i", "--inp", default="test_ntuple.root", help="Input root file")
 parser.add_argument("-o", "--out", default="testfile", help="Name of output ROOT file")
-
+parser.add_argument("-s", "--start", type=int, help="Start index for events")
+parser.add_argument("-e", "--end", type=int, help="End index for events")
 
 args = parser.parse_args()
 
 infile = args.inp
+start_index = args.start
+end_index = args.end
 
 #Infile = TFile(infile, 'READ')
 #demo = Infile.Get('demo')
@@ -81,11 +84,7 @@ def delta_phi(phi1, phi2):
     Calculate the difference in phi between two angles.
     """
     dphi = phi2 - phi1
-    while dphi > math.pi:
-        dphi -= 2 * math.pi
-    while dphi < -math.pi:
-        dphi += 2 * math.pi
-    return dphi
+    return (dphi + np.pi) % (2 * np.pi) - np.pi
 
 def delta_eta(eta1, eta2):
     """
@@ -97,12 +96,17 @@ def delta_R(eta1, phi1, eta2, phi2):
     """
     Calculate the distance in eta-phi space.
     """
-    deta = delta_eta(eta1, eta2)
-    dphi = delta_phi(phi1, phi2)
-    return math.sqrt(deta**2 + dphi**2)
+    deta = delta_eta(eta1[:, None], eta2)
+    dphi = delta_phi(phi1[:, None], phi2)
+    return np.sqrt(deta**2 + dphi**2)
 
 for i, evt in enumerate(tree):
-    print("Processing event:", i)
+    if i < start_index:
+        continue
+    if i >= end_index:
+        break
+
+    if(i%1000 ==0): print(i) 
     sig_ind.clear()
     bkg_ind.clear()
     seed_ind.clear()
@@ -138,7 +142,6 @@ for i, evt in enumerate(tree):
         trk_nValidStrip.push_back(evt.trk_nValidStrip[trk])
         trk_charge.push_back(evt.trk_charge[trk])
 
-
     nds = sum(evt.nDaughters)
 
     #MATCHING SV TRKS TO TRKS
@@ -156,10 +159,18 @@ for i, evt in enumerate(tree):
         for ind in svtrkinds:
             SVtrk_ind.push_back(int(ind))
 
-    tinds = []
+    #tinds = []
      
 
     if(nds>0):
+        trk_eta_array = np.array([evt.trk_eta[trk] for trk in range(evt.nTrks[0])])
+        trk_phi_array = np.array([evt.trk_phi[trk] for trk in range(evt.nTrks[0])])
+        d_eta_array = np.array([evt.Daughters_eta[d] for d in range(nds)])
+        d_phi_array = np.array([evt.Daughters_phi[d] for d in range(nds)])
+
+        delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
+
+
         for d in range(nds):
             trk_mindr = 1e6
             trk_flag = -1
@@ -175,7 +186,7 @@ for i, evt in enumerate(tree):
                 #if(trk in tinds): continue
                 if(evt.trk_charge[trk] != evt.Daughters_charge[d]): continue
                 if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
-                delR = delta_R(evt.trk_eta[trk], evt.trk_phi[trk], evt.Daughters_eta[d], evt.Daughters_phi[d]) 
+                delR = delta_R_matrix[trk, d]
                 temp_ptrat = (evt.trk_pt[trk])/(evt.Daughters_pt[d])
                 if (delR <= trk_mindr and delR< 0.02 and temp_ptrat > 0.8 and temp_ptrat < 1.2):
                     trk_mindr = delR
@@ -193,7 +204,7 @@ for i, evt in enumerate(tree):
                 sig_ind.push_back(tind)
                 sig_flag.push_back(trk_flag)
                 sig_flav.push_back(trk_flav)
-                tinds.append(tind)
+                #tinds.append(tind)
 
     outtree.Fill()
 

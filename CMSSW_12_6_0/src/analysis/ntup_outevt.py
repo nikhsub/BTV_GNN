@@ -1,7 +1,7 @@
 import ROOT
 from collections import Counter
 
-infile = "newtest2.root"
+infile = "newtest.root"
 Infile = ROOT.TFile(infile, 'READ')
 
 tree = Infile.Get('tree')

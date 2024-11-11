@@ -12,6 +12,6 @@ echo $CMSSW_BASE "is the CMSSW we created on the local worker node"
 source $ROOTSYS/bin/thisroot.sh
 cd $current
 
-python3 $1 -i $2 -o $3
+python3 $1 -i $2 -o $3 -s $4 -e $5
 
 

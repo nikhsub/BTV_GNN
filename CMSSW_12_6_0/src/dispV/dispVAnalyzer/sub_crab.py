@@ -32,7 +32,8 @@ config.JobType.pluginName = 'Analysis'
 #config.JobType.allowUndistributedCMSSW = True
 
 config.Data.splitting = 'FileBased'
-config.Data.unitsPerJob = 10
+config.Data.unitsPerJob = 1
+config.Data.totalUnits = 30
 config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarhad_'+str(timestamp)
 config.Data.publication = False
 
