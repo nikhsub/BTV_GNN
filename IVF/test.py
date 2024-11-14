@@ -27,7 +27,6 @@ parser = argparse.ArgumentParser("GNN testing")
 parser.add_argument("-ltr", "--load_train", default="", help="Load training data from a file")
 parser.add_argument("-lm",  "--load_model", default="", help="Load model file")
 parser.add_argument("-e",  "--event", default=False, action="store_true", help="Running on event?")
-parser.add_argument("-s", "--scaler", default="", help="Path to scaler file")
 parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
 parser.add_argument("-had", "--hadron", default=False, action="store_true", help="Testing on hadronic samples")
 
@@ -40,16 +39,13 @@ if args.load_train != "":
     with open(args.load_train, 'rb') as f:
         train_graphs = pickle.load(f)
 
-def scale_data(data_list, scaler):
-    for data in data_list:
-        data.x = torch.tensor(scaler.transform(data.x), dtype=torch.float)
-    return data_list
-
-scaler = joblib.load(args.scaler)
+def scale_features(x, eps=1e-6):
+    mean = x.mean(dim=0, keepdim=True)
+    std = x.std(dim=0, keepdim=True)
+    x_scaled = (x - mean) / (std + eps)
+    return x_scaled
 
 val_graphs = train_graphs[:]
-
-val_graphs = scale_data(val_graphs, scaler)
 
 model = GNNModel(len(trk_features), 512)
 
@@ -65,6 +61,8 @@ if(not args.event):
         with torch.no_grad():
     
             data = data.to(device)
+
+            data.x = scale_features(data.x)
             edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
     
             _, preds = model(data, edge_index, device)
@@ -103,6 +101,8 @@ if(args.event):
 
 
             data = data.to(device)
+            data.x = scale_features(data.x)
+
             edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
             _, preds = model(data, edge_index, device)
             preds = preds.squeeze().cpu().numpy()
@@ -131,6 +131,9 @@ if(args.event):
 
             labels = np.zeros(len(preds))
             labels[siginds] = 1  # Set signal indices to 1
+
+            #print("PREDS", preds)
+            #print("LABELS", labels)
 
             all_preds.extend(preds)
             all_labels.extend(labels)

@@ -43,16 +43,17 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
     for evt in range(int(args.start), int(args.end)):
         print(evt)
         evt_features = {f: trk_data[f][evt] for f in trk_features}
-        seeds = seed_array[evt]
+        #seeds = seed_array[evt]
 
         if(not args.train):
             fullfeatmat = np.stack([evt_features[f] for f in trk_features], axis=1)
+            fullfeatmat = np.array(fullfeatmat, dtype=np.float32)
             nan_mask = ~np.isnan(fullfeatmat).any(axis=1)
             fullfeatmat = fullfeatmat[nan_mask]
             valid_indices = np.where(nan_mask)[0]
 
             evtsiginds = list(set(sig_ind_array[evt]))
-            evtsigflags = [sig_flag_array[evt][sig_ind_array[evt].index(ind)] for ind in evtsiginds]
+            evtsigflags = [sig_flag_array[evt][np.where(sig_ind_array[evt] == ind)[0][0]] for ind in evtsiginds]
             evtbkginds = list(set(bkg_ind_array[evt]))
             evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
             evtsvinds = list(set(SV_ind_array[evt]))
@@ -60,13 +61,13 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             # Adjust valid indices for masking
             evtsiginds = [np.where(valid_indices == ind)[0][0] for ind in evtsiginds if ind in valid_indices]
             evtbkginds = [np.where(valid_indices == ind)[0][0] for ind in evtbkginds if ind in valid_indices]
-            seeds      = [np.where(valid_indices == ind)[0][0] for ind in seeds if ind in valid_indices]
+            #seeds      = [np.where(valid_indices == ind)[0][0] for ind in seeds if ind in valid_indices]
             evtsvinds  = [np.where(valid_indices == ind)[0][0] for ind in evtsvinds if ind in valid_indices]
             evtsigflags = [flag for ind, flag in zip(sig_ind_array[evt], evtsigflags) if ind in valid_indices]
 
             evt_data = Data(
                 evt=evt,
-                seeds=torch.tensor(seeds, dtype=torch.int16),
+                #seeds=torch.tensor(seeds, dtype=torch.int16),
                 x=torch.tensor(fullfeatmat, dtype=torch.float),
                 siginds=torch.tensor(evtsiginds, dtype=torch.int16),
                 sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
@@ -88,6 +89,9 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
                 val_comb_inds = np.array(comb_inds)[had_nan_mask]
 
                 sig_inds = [i for i, ind in enumerate(val_comb_inds) if ind in sig_inds]
+
+                if(len(sig_inds) < 3): continue
+
                 bkg_inds = [i for i, ind in enumerate(val_comb_inds) if ind in bkg_inds]
                 labels = np.zeros(len(sig_inds) + len(bkg_inds))
                 labels[:len(sig_inds)] = 1
@@ -95,15 +99,24 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
                 shuffled_inds = np.random.permutation(len(labels))
                 feature_matrix = feature_matrix[shuffled_inds]
                 labels = labels[shuffled_inds]
-                sig_inds = [shuffled_inds.tolist().index(i) for i in sig_inds]
-                bkg_inds = [shuffled_inds.tolist().index(i) for i in bkg_inds]
+                #sig_inds = [shuffled_inds.tolist().index(i) for i in sig_inds]
+                #bkg_inds = [shuffled_inds.tolist().index(i) for i in bkg_inds]
+
+                num_nodes = feature_matrix.shape[0]
+
+                max_edges = num_nodes *(num_nodes -1) // 2
+
+                num_edges = max_edges // 2
+
+                source = np.random.randint(0, num_nodes, num_edges)
+                target = np.random.randint(0, num_nodes, num_edges)
+
+                edge_index = torch.tensor(np.vstack([source, target]), dtype=torch.int32)
 
                 had_data = Data(
-                    evt=evt,
-                    had=had,
-                    seeds=torch.tensor(sig_inds, dtype=torch.int16),
                     x=torch.tensor(feature_matrix, dtype=torch.float),
-                    y=torch.tensor(labels, dtype=torch.float)
+                    y=torch.tensor(labels, dtype=torch.float),
+                    edge_index=edge_index
                 )
                 had_objects.append(had_data)
 

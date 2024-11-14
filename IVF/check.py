@@ -22,8 +22,9 @@ for i, data in enumerate(evt_data):
     #print("LABELS", data.y)
     print("DATA", data.x.size(0))
     #print("SEEDS", data.seeds)
-    print("SIGINDS", data.seeds)
-    print("LABELS", data.y)
+    print("SIGINDS", data.siginds)
+    print("SIGFLAGS", data.sigflags)
+    #print("LABELS", data.y)
     #print("SVINDS", data.svinds)
     
     #print("Total tracks: ", data.x.size(0))
