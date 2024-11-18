@@ -20,20 +20,25 @@ import math
 from conmodel import *
 import joblib
 from sklearn.metrics import roc_auc_score
+from torch.optim.lr_scheduler import StepLR
 
 parser = argparse.ArgumentParser("GNN training")
 
 parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
 parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
 parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
+parser.add_argument("-le", "--load_evt", default="", help="Path to event level validation file")
 
 args = parser.parse_args()
 glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
+batchsize = 1024
+
 #LOADING DATA
 train_hads = []
+val_evts = []
 if args.load_had != "":
     if os.path.isdir(args.load_had):
         print(f"Loading training data from {args.load_had}...")
@@ -43,40 +48,57 @@ if args.load_had != "":
         with open(pkl_file, 'rb') as f:
             train_hads.extend(pickle.load(f))
 
+if args.load_evt != "":
+    print(f"Loading event level data from {args.load_evt}...")
+
+
 train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
-
-#SPLITTING, SCALING AND LOADING
-#print("Scaling....")
-#def scale_data(data_list, scaler):
-#    for data in data_list:
-#        data.x = torch.tensor(scaler.transform(data.x), dtype=torch.float)
-#    return data_list
-
-#def fit_scaler_on_subset(data_list, scaler, subset_size=1000):
-#    random_indices = np.random.choice(len(data_list), size=min(subset_size, len(data_list)), replace=False)
-#    subset_features = torch.cat([data_list[i].x for i in random_indices], dim=0).cpu().numpy()
-#    scaler.fit(subset_features)
-#    print(f"Fitted scaler on {len(subset_features)} samples (subset).")
-#
-#    return scaler
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
 
-train_loader = DataLoader(train_data, batch_size=128, shuffle=True, pin_memory=True, num_workers=4)
-test_loader = DataLoader(test_data, batch_size=128, shuffle=False)
+train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=4)
+test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=4)
+
+def get_scale_params(data_loader, num_batches, eps=1e-6):
+    total_mean = 0
+    total_std = 0
+    num_samples = 0
+
+    for i, data in enumerate(data_loader):
+        if i >= num_batches:
+            break
+        x = data.x
+        total_mean += x.sum(dim=0)
+        total_std += ((x - x.mean(dim=0, keepdim=True)) ** 2).sum(dim=0)
+        num_samples += x.size(0)
+
+    mean = total_mean / num_samples
+    std = torch.sqrt(total_std / num_samples + eps)
+
+    # Convert to lists and save to file
+    scaling_params = {'mean': mean.tolist(), 'std': std.tolist()}
+    with open(args.modeltag+"_scalar.json", 'w') as f:
+        json.dump(scaling_params, f)
+
+    return mean, std
+
+#scale_mean, scale_std = get_scale_params(train_loader, 20000 // batchsize)
+
 
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+#scale_mean = scale_mean.to(device)
+#scale_std = scale_std.to(device)
+
 model = GNNModel(indim=len(trk_features), outdim=512)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.00005)
+#scheduler = StepLR(optimizer, step_size = 5, gamma=0.94)
 
-import torch
-
-def scale_features(x, eps=1e-6):
-    mean = x.mean(dim=0, keepdim=True)
-    std = x.std(dim=0, keepdim=True)
+def scale_features(x, mean, std, eps=1e-6):
+    mean  = mean.to(x.device)
+    std = std.to(x.device)
     x_scaled = (x - mean) / (std + eps)
     return x_scaled
 
@@ -115,7 +137,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
         data = data.to(device)
 
-        data.x = scale_features(data.x)
+        #data.x = scale_features(data.x, scale_mean, scale_std)
 
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
@@ -137,6 +159,7 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
 
         loss.backward()
         optimizer.step()
+        #scheduler.step()
 
         total_loss      += loss.item()
         total_node_loss += node_loss.item()
@@ -171,7 +194,7 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             batch = batch.to(device)
             num_nodes = batch.x.size(0)
             
-            batch.x = scale_features(batch.x)
+            #batch.x = scale_features(batch.x, scale_mean, scale_std)
             
             edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 

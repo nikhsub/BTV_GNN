@@ -17,6 +17,8 @@ class GNNModel(torch.nn.Module):
                             nn.Linear(outdim//4, outdim//8)
                          )
 
+        self.bn0 = nn.BatchNorm1d(outdim//8)
+
         self.gcn1 = GCNConv(outdim//8, outdim//4)
         self.gat1 = GATConv(outdim//4, outdim//4, heads=heads, concat=False)
 
@@ -49,6 +51,7 @@ class GNNModel(torch.nn.Module):
 
 
         x = self.nn1(data.x)
+        x = self.bn0(x)
         x = F.leaky_relu(x)
 
         x1 = self.gcn1(x, edge_index)

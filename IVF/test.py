@@ -6,6 +6,7 @@ import argparse
 import uproot
 import numpy as np
 import torch
+import json
 import torch_geometric
 from torch_geometric.data import Data, DataLoader
 from torch.utils.data import random_split
@@ -28,6 +29,7 @@ parser.add_argument("-ltr", "--load_train", default="", help="Load training data
 parser.add_argument("-lm",  "--load_model", default="", help="Load model file")
 parser.add_argument("-e",  "--event", default=False, action="store_true", help="Running on event?")
 parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
+#parser.add_argument("-s", "--scalar", default="", help="Scalar")
 parser.add_argument("-had", "--hadron", default=False, action="store_true", help="Testing on hadronic samples")
 
 args = parser.parse_args()
@@ -39,7 +41,7 @@ if args.load_train != "":
     with open(args.load_train, 'rb') as f:
         train_graphs = pickle.load(f)
 
-def scale_features(x, eps=1e-6):
+def scale_features(x, mean, std, eps=1e-6):
     mean = x.mean(dim=0, keepdim=True)
     std = x.std(dim=0, keepdim=True)
     x_scaled = (x - mean) / (std + eps)
@@ -54,6 +56,13 @@ model.load_state_dict(torch.load(args.load_model))
 model.eval()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+#with open(args.scalar, 'r') as f:
+#    scale_params = json.load(f)
+#
+#scale_mean = torch.tensor(scale_params['mean'], device=device)
+#scale_std = torch.tensor(scale_params['std'], device=device)
+
 model.to(device)
 
 if(not args.event):
@@ -101,7 +110,7 @@ if(args.event):
 
 
             data = data.to(device)
-            data.x = scale_features(data.x)
+            #data.x = scale_features(data.x, scale_mean, scale_std)
 
             edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
             _, preds = model(data, edge_index, device)
