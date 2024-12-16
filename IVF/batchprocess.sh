@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Directory paths
-INPUT_DIR="comb_ttbarhad_files"    # Set your input directory containing .root files
-OUTPUT_DIR="files/training/ttbar_had_1411_3sig"  # Set your output directory for .pkl files
+INPUT_DIR="ttbar_lep_lowpt50_toproc"    # Set your input directory containing .root files
+OUTPUT_DIR="files/training/ttbar_lep_lowpt50_0512"  # Set your output directory for .pkl files
 
 mkdir -p "$OUTPUT_DIR"
 
 # Parameters for event processing
 START_EVT=0
-END_EVT=40000
+END_EVT=-1
 
 # Loop through all ROOT files in the input directory
 for file_path in "$INPUT_DIR"/*.root; do

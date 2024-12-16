@@ -33,8 +33,8 @@ config.JobType.pluginName = 'Analysis'
 
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
-config.Data.totalUnits = 30
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarhad_'+str(timestamp)
+config.Data.totalUnits = 62
+config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -64,10 +64,11 @@ def submit(config):
 def sub_crab_job():
 
     #datasetname = getstatusoutput("das_client --query='dataset=/splitSUSY_M1000_"+str(mass)+"_ctau"+str(life)+"p0_TuneCP2_13TeV-pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*'")[1].split("\n")[0]
-    datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
-    config.General.requestName = 'MC_ttbarhad_'+str(timestamp)
+    #datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+    datasetname = getstatusoutput("das_client --query='dataset='/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+    config.General.requestName = 'MC_ttbarlep_'+str(timestamp)
     config.JobType.psetName = 'Events_cfg.py'
-    config.Data.outputDatasetTag = 'MC_ttbarhad_'+str(timestamp)
+    config.Data.outputDatasetTag = 'MC_ttbarlep_'+str(timestamp)
     config.Data.inputDataset = datasetname
     print(datasetname)
     #submit(config)

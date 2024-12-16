@@ -21,6 +21,7 @@ from conmodel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
+from sklearn.metrics import roc_curve, auc
 
 parser = argparse.ArgumentParser("GNN training")
 
@@ -50,73 +51,24 @@ if args.load_had != "":
 
 if args.load_evt != "":
     print(f"Loading event level data from {args.load_evt}...")
-
+    with open(args.load_evt, 'rb') as f:
+        val_evts = pickle.load(f)
 
 train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
+val_evts   = val_evts[0:1000]
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
 
-train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=4)
-test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=4)
-
-def get_scale_params(data_loader, num_batches, eps=1e-6):
-    total_mean = 0
-    total_std = 0
-    num_samples = 0
-
-    for i, data in enumerate(data_loader):
-        if i >= num_batches:
-            break
-        x = data.x
-        total_mean += x.sum(dim=0)
-        total_std += ((x - x.mean(dim=0, keepdim=True)) ** 2).sum(dim=0)
-        num_samples += x.size(0)
-
-    mean = total_mean / num_samples
-    std = torch.sqrt(total_std / num_samples + eps)
-
-    # Convert to lists and save to file
-    scaling_params = {'mean': mean.tolist(), 'std': std.tolist()}
-    with open(args.modeltag+"_scalar.json", 'w') as f:
-        json.dump(scaling_params, f)
-
-    return mean, std
-
-#scale_mean, scale_std = get_scale_params(train_loader, 20000 // batchsize)
-
+train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=8)
+test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=8)
 
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-#scale_mean = scale_mean.to(device)
-#scale_std = scale_std.to(device)
-
 model = GNNModel(indim=len(trk_features), outdim=512)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00005)
-#scheduler = StepLR(optimizer, step_size = 5, gamma=0.94)
-
-def scale_features(x, mean, std, eps=1e-6):
-    mean  = mean.to(x.device)
-    std = std.to(x.device)
-    x_scaled = (x - mean) / (std + eps)
-    return x_scaled
-
-def drop_random_edges(edge_index, drop_rate, device):
-    """Randomly drop a percentage of edges from the graph"""
-    num_edges = edge_index.size(1)
-    mask = torch.rand(num_edges, device=device) > drop_rate
-    return edge_index[:, mask]
-
-def contrastive_loss(x1, x2, temperature=0.5):
-    """Compute the contrastive loss"""
-    x1 = F.normalize(x1, dim=1)
-    x2 = F.normalize(x2, dim=1)
-    batch_size = x1.size(0)
-    similarity_matrix = torch.mm(x1, x2.t()) / temperature
-    labels = torch.arange(batch_size).to(x1.device)
-    loss = F.cross_entropy(similarity_matrix, labels)
-    return loss
+#scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
     """Class-weighted binary cross-entropy loss"""
@@ -137,23 +89,16 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
         data = data.to(device)
 
-        #data.x = scale_features(data.x, scale_mean, scale_std)
-
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
-
-        #edge_index2 = drop_random_edges(edge_index, drop_rate)
         
-        node_embeds1, preds1 = model(data, data.edge_index, device)
-        #assert preds1.device == device, f"preds1 is not on the device: {preds1.device}"
-        #node_embeds2, preds2 = model(data, edge_index2, device)
+        node_embeds1, preds1 = model(data.x, data.edge_index, device)
 
-        #cont_loss = contrastive_loss(node_embeds1, node_embeds2, temp)
         cont_loss = torch.tensor(0.0, device=device)
 
-        #node_loss = F.binary_cross_entropy(preds1, data.y.float().unsqueeze(1))
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*scale
-        #node_loss = torch.tensor(0.0, device=device) #Testing with only contloss
+        batch_had_weight = data.had_weight[data.batch].mean().to(device)
+
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
 
         loss = cont_loss + node_loss
 
@@ -198,7 +143,7 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             
             edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, preds = model(batch, edge_index, device)
+            _, preds = model(batch.x, edge_index, device)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
             all_labels.extend(batch.y.cpu().numpy())
@@ -237,8 +182,47 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
 
     return bkg_accuracy, sig_accuracy, avg_loss, auc
 
+def validate(model, val_graphs, device, epoch, k=5):
+    model.to(device)
+    model.eval()
+
+    all_preds = []
+    all_labels = []
+    total_loss = 0
+    num_samps = 0
+
+    for i, data in enumerate(val_graphs):
+        with torch.no_grad():
+            data = data.to(device)
+            edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
+            _, preds = model(data.x, edge_index, device)
+            preds = preds.squeeze()
+            siginds = data.siginds.cpu().numpy()
+            #labels = np.zeros(len(preds))
+            labels = torch.zeros(len(preds), device=device)
+            labels[siginds] = 1  # Set signal indices to 1
+            evt_loss = F.binary_cross_entropy(preds, labels)
+            total_loss += evt_loss.item()
+            num_samps +=1
+
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    fpr, tpr, thresholds = roc_curve(all_labels, all_preds)
+    roc_auc = auc(fpr, tpr)
+
+    avg_loss = total_loss / num_samps if num_samps > 0 else 0
+
+    return roc_auc, avg_loss
+
+
 
 best_auc = 0
+patience = 5 
+no_improve = 0
+val_every = 10
 
 stats = {
     "epochs": [],
@@ -247,34 +231,77 @@ stats = {
         "total_loss": None,
         "node_loss": None,
         "cont_loss": None,
-        "auc": None,
         "bkg_acc": None,
         "sig_acc": None,
+        "test_auc": None,
         "test_loss": None,
-        "total_acc": None
+        "total_acc": None,
+        "val_auc": None,
+        "val_loss": None
+
     }
 }
 
 for epoch in range(int(args.epochs)):
     tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch)
-    bkg_acc, sig_acc, test_loss, auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
+    bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
     sum_acc = bkg_acc + sig_acc
+
+    val_auc = -1
+    val_loss = -1
+
+    if (epoch+1) % val_every == 0:
+        print(f"Validating at epoch {epoch}...")
+        val_auc, val_loss = validate(model, val_evts, device, epoch)
+        print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
+
+        if val_auc > best_auc:
+            best_auc = val_auc
+            no_improve = 0
+
+            stats["best_epoch"] = {
+                "epoch": epoch + 1,
+                "total_loss": tot_loss,
+                "node_loss": node_loss,
+                "cont_loss": cont_loss,
+                "bkg_acc": bkg_acc,
+                "sig_acc": sig_acc,
+                "test_auc": test_auc,
+                "test_loss": test_loss,
+                "total_acc": sum_acc,
+                "val_auc": val_auc,
+                "val_loss": val_loss
+            }
+
+            save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
+            torch.save(model.state_dict(), save_path)
+            print(f"Model saved to {save_path}")
+
+        else:
+            no_improve += 1
+            print(f"Validation AUC did not improve after {val_every} epochs")
+
+        if no_improve >= patience:
+            print(f"Early stopping triggered after {patience*val_every} epochs of no improvement.")
+            break
 
     epoch_stats = {
         "epoch": epoch + 1,
         "total_loss": tot_loss,
         "node_loss": node_loss,
         "cont_loss": cont_loss,
-        "auc": auc,
         "bkg_acc": bkg_acc,
         "sig_acc": sig_acc,
+        "test_auc": test_auc,
         "test_loss": test_loss,
-        "total_acc": sum_acc
+        "total_acc": sum_acc,
+        "val_auc": val_auc,
+        "val_loss": val_loss
     }
     stats["epochs"].append(epoch_stats)
     
     print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}")
-    print(f"AUC: {auc:.4f}, Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
+    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
 
 
     if(epoch> 0 and epoch%10==0):
@@ -283,26 +310,6 @@ for epoch in range(int(args.epochs)):
         print(f"Model saved to {savepath}")
 
     
-    if auc > best_auc and epoch > 0: #and sig_prob > bkg_prob:
-        
-        stats["best_epoch"] = {
-            "epoch": epoch + 1,
-            "total_loss": tot_loss,
-            "node_loss": node_loss,
-            "cont_loss": cont_loss,
-            "bkg_acc": bkg_acc,
-            "auc": auc,
-            "sig_acc": sig_acc,
-            "test_loss": test_loss,
-            "total_acc": sum_acc
-        }
-
-        save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
-        torch.save(model.state_dict(), save_path)
-        print(f"Model saved to {save_path}")
-
-    if auc > best_auc: best_auc = auc
-
     with open("training_stats_"+args.modeltag+".json", "w") as f:
         json.dump(stats, f, indent=4)
 

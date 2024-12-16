@@ -57,7 +57,7 @@ def main():
     for file_index, filename in enumerate(root_files, start=1):  # Start file index from 1
         # Adjust filename path for Condor
         filename = filename[filename.find("/store"):]
-        filename = f"root://cmseos.fnal.gov/{filename}"
+        filename = f"root://cmseos.fnal.gov/{filename}" #UNCOMMENT FOR EOS AREA
 
         # Calculate number of chunks
         total_events = get_total_events(filename)

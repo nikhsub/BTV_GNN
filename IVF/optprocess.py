@@ -25,6 +25,8 @@ print("Loading files...")
 with uproot.open(args.data) as f:
     datatree = f['tree']
 
+num_evts = datatree.num_entries
+
 # Preload arrays for all events for faster access in loops
 trk_data = {feat: datatree[feat].array() for feat in trk_features}
 sig_ind_array = datatree['sig_ind'].array()
@@ -33,14 +35,18 @@ bkg_flag_array = datatree['bkg_flag'].array()
 bkg_ind_array = datatree['bkg_ind'].array()
 seed_array = datatree['seed_ind'].array()
 SV_ind_array = datatree['SVtrk_ind'].array()
+had_pt_array = datatree['had_pt'].array()
 
 def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
-                   seed_array, SV_ind_array, trk_features, nevts=3):
+                   seed_array, SV_ind_array, had_pt_array, trk_features, nevts=3):
 
     evt_objects = []
     had_objects = []
 
-    for evt in range(int(args.start), int(args.end)):
+    if (int(args.end) == -1): end = num_evts
+    else: end = int(args.end)
+
+    for evt in range(int(args.start), end):
         print(evt)
         evt_features = {f: trk_data[f][evt] for f in trk_features}
         #seeds = seed_array[evt]
@@ -78,11 +84,17 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
         if args.train:
             # Process hadrons within the event if in training mode
+            
+            bins = [10, 20, 30, 40, 50]
+            had_weights = [4, 3, 2, 1] #10to20, 20to30, 30to40, 40to50
+
             for had in np.unique(sig_flag_array[evt]):
                 sig_inds = sig_ind_array[evt][sig_flag_array[evt] == had]
                 bkg_inds = list(set(bkg_ind_array[evt][bkg_flag_array[evt] == had]) - set(sig_inds))
                 comb_inds = list(sig_inds) + bkg_inds
                 feature_matrix = np.vstack([np.array([evt_features[f][int(ind)] for ind in comb_inds]) for f in trk_features]).T
+
+                hadron_pt = had_pt_array[evt][had]
 
                 had_nan_mask = ~np.isnan(feature_matrix).any(axis=1)
                 feature_matrix = feature_matrix[had_nan_mask]
@@ -113,10 +125,17 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
                 edge_index = torch.tensor(np.vstack([source, target]), dtype=torch.int32)
 
+                hadron_weight = 1  # Default weight
+                for i, (lower, upper) in enumerate(zip(bins[:-1], bins[1:])):
+                    if lower <= hadron_pt < upper:
+                        hadron_weight = had_weights[i]
+                        break
+
                 had_data = Data(
                     x=torch.tensor(feature_matrix, dtype=torch.float),
                     y=torch.tensor(labels, dtype=torch.float),
-                    edge_index=edge_index
+                    edge_index=edge_index,
+                    had_weight=torch.tensor([hadron_weight], dtype=torch.float)
                 )
                 had_objects.append(had_data)
 
@@ -124,7 +143,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
 print("Creating data objects...")
 evt_data, had_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
-                                    seed_array, SV_ind_array, trk_features)
+                                    seed_array, SV_ind_array, had_pt_array, trk_features)
 
 if not args.train:
     print(f"Saving evt_data to evtdata_{args.save_tag}.pkl...")

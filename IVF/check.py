@@ -20,10 +20,10 @@ for i, data in enumerate(evt_data):
     print("EVENT", i)
 
     #print("LABELS", data.y)
-    print("DATA", data.x.size(0))
+    print("DATA", data.x[:, 7])
     #print("SEEDS", data.seeds)
-    print("SIGINDS", data.siginds)
-    print("SIGFLAGS", data.sigflags)
+    #print("SIGINDS", data.siginds)
+    #print("SIGFLAGS", data.sigflags)
     #print("LABELS", data.y)
     #print("SVINDS", data.svinds)
     

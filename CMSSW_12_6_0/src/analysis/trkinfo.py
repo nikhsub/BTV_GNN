@@ -58,6 +58,10 @@ trk_nValidPixel = std.vector('double')()
 trk_nValidStrip = std.vector('double')()
 trk_charge      = std.vector('double')()
 
+had_pt          = std.vector('double')()
+nhads           = std.vector('int')()
+
+outtree.Branch("had_pt", had_pt)
 outtree.Branch("sig_flag", sig_flag)
 outtree.Branch("sig_flav", sig_flav)
 outtree.Branch("sig_ind", sig_ind)
@@ -100,13 +104,18 @@ def delta_R(eta1, phi1, eta2, phi2):
     dphi = delta_phi(phi1[:, None], phi2)
     return np.sqrt(deta**2 + dphi**2)
 
+
 for i, evt in enumerate(tree):
     if i < start_index:
         continue
     if i >= end_index:
         break
 
-    if(i%1000 ==0): print(i) 
+    if(i%1000 ==0): 
+        print("EVT", i) 
+    
+    nhads.clear()
+    had_pt.clear()
     sig_ind.clear()
     bkg_ind.clear()
     seed_ind.clear()
@@ -127,6 +136,23 @@ for i, evt in enumerate(tree):
     trk_nValid.clear();
     trk_nValidPixel.clear();
     trk_nValidStrip.clear();
+    
+    #low_pt = False
+    #for had in range(evt.nHadrons[0]):
+    #    print(evt.Hadron_pt[had])
+    #    if(evt.Hadron_pt[had] < 50):
+    #        low_pt = True
+    #if(not low_pt): continue
+
+    high_pt = np.any(np.array(evt.Hadron_pt) > 50)
+    if(high_pt): continue
+    
+    hads = 0
+    for had in range(evt.nHadrons[0]):
+        hads+=1
+        had_pt.push_back(evt.Hadron_pt[had])
+
+    nhads.push_back(hads)
 
     for trk in range(evt.nTrks[0]):
         trk_ip2d.push_back(evt.trk_ip2d[trk])

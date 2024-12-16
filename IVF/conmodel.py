@@ -47,10 +47,10 @@ class GNNModel(torch.nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, data, edge_index, device):
+    def forward(self, x_in, edge_index, device):
 
 
-        x = self.nn1(data.x)
+        x = self.nn1(x_in)
         x = self.bn0(x)
         x = F.leaky_relu(x)
 
@@ -70,6 +70,6 @@ class GNNModel(torch.nn.Module):
 
         xf = torch.cat([x, x1, x2], dim=1)
 
-        edge_probs = self.node_pred(xf)
+        node_probs = self.node_pred(xf)
 
-        return xf, edge_probs
+        return xf, node_probs
