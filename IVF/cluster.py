@@ -24,44 +24,9 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from scipy.optimize import minimize
+import vector
 
-def helix_trajectory(phi, eta, pt, ip2d, ip3d, q, B):
-    c = 0.3  # GeV/(T*m)
-    R = pt / (q * B * c)  # Helix radius in meters
-
-    x0 = ip3d  # Longitudinal displacement along global reference direction
-    y0 = ip2d * np.sin(phi)  # Signed transverse displacement in y
-    z0 = ip2d * np.cos(phi)
-
-    px = pt * np.cos(phi)
-    py = pt * np.sin(phi)
-    pz = pt * np.sinh(eta)
-
-    def trajectory(t):
-        x = x0 + R * np.sin(q * t)
-        y = y0 - R * (1 - np.cos(q * t))
-        z = z0 + pz * t / pt  # Linear motion along z
-        return np.array([x, y, z])
-
-    return trajectory
-
-def vertex_fit(track_params, B):
-    def total_distance(vertex):
-        vertex = np.array(vertex)
-        distances = []
-        for phi, eta, pt, ip2d, ip3d, q in track_params:
-            trajectory = helix_trajectory(phi, eta, pt, ip2d, ip3d, q, B)
-            def distance_to_vertex(t):
-                return np.linalg.norm(trajectory(t) - vertex)
-            res = minimize(distance_to_vertex, x0=0)
-            distances.append(res.fun)
-        return np.sum(np.square(distances))
-
-    initial_guess = np.array([0, 0, -1])
-    result = minimize(total_distance, initial_guess)
-    return result.x
-
-B = 3.8
+pion_mass = 0.13957018
 
 parser = argparse.ArgumentParser("GNN testing")
 
@@ -113,13 +78,12 @@ for i, data in enumerate(val_graphs):
 
         eta  = data.x[:, 0].cpu().numpy()  # First feature (eta)
         phi  = data.x[:, 1].cpu().numpy()  # Second feature (phi)
+        pt   = data.x[:, 7].cpu().numpy()
         ip2d = data.x[:, 2].cpu().numpy()
         ip3d = data.x[:, 3].cpu().numpy()
-        pt   = data.x[:, 7].cpu().numpy()
-        q    = data.x[:, 11].cpu().numpy()
 
         predictions = preds  # Predicted values (already on CPU and numpy)
-            
+
         #CLUSTERING
         threshold = 0.8  # Prediction threshold for clustering
         high_pred_indices = np.where(predictions > threshold)[0]
@@ -129,7 +93,7 @@ for i, data in enumerate(val_graphs):
         signal_indices = siginds
 
         data_for_clustering = np.vstack((
-        eta[high_pred_indices], phi[high_pred_indices])).T
+        eta[high_pred_indices], phi[high_pred_indices], predictions[high_pred_indices])).T
 
         eps = 0.5  # Clustering distance
         min_samples = 2
@@ -176,18 +140,67 @@ for i, data in enumerate(val_graphs):
                         label=f'Cluster {cluster_id}'
                     )
                     
-                    cluster_eta = eta[cluster_indices]
-                    cluster_phi = phi[cluster_indices]
-                    cluster_pt = pt[cluster_indices]
+                    cluster_eta  = eta[cluster_indices]
+                    cluster_phi  = phi[cluster_indices]
+                    cluster_pt   = pt[cluster_indices]
+                    cluster_ip2d = ip2d[cluster_indices]
+                    cluster_ip3d = ip3d[cluster_indices]
+                    mass = np.full_like(cluster_pt, pion_mass)
 
-                    #for params in cluster_params:
-                    #    print(params)
+                    tracks = vector.array(
+                        {
+                            "pt": cluster_pt,
+                            "eta": cluster_eta,
+                            "phi": cluster_phi,
+                            "mass": mass,
+                        }
+                    )
 
-#                    secondary_vertex = vertex_fit(cluster_params, B)
-#                    print(f"Evt {i} SV {cluster_id} = {secondary_vertex}")
+                    total_lorentz_vector = tracks.sum()
 
-                        
+                    # Calculate the total momentum components (px, py, pz)
+                    px_total = total_lorentz_vector.px
+                    py_total = total_lorentz_vector.py
+                    pz_total = total_lorentz_vector.pz
+                    
+                    # Initialize variables to calculate the weighted average position
+                    total_weight = 0
+                    sum_x, sum_y, sum_z = 0, 0, 0
+                    
+                    # Loop over each track in the cluster to calculate the position contributions
+                    for j in range(len(cluster_pt)):
+                        # Use the inverse of the 3D impact parameter as the weight
+                        weight = 1 / (cluster_ip3d[j] + 1e-5)  # avoid division by zero
+                    
+                        # Assuming the IP is the displacement from the primary vertex (can be a simplification)
+                        track_x = cluster_ip2d[j] * (px_total / cluster_pt[j]) * weight
+                        track_y = cluster_ip2d[j] * (py_total / cluster_pt[j]) * weight
+                        track_z = cluster_ip3d[j] * weight  # Use 3D IP for the z component
+                    
+                        # Accumulate the weighted sum of positions
+                        sum_x += track_x
+                        sum_y += track_y
+                        sum_z += track_z
+                        total_weight += weight
+                    
+                    # Compute the weighted average position for the secondary vertex
+                    sv_x = sum_x / total_weight
+                    sv_y = sum_y / total_weight
+                    sv_z = sum_z / total_weight
 
+                    # Calculate the components of the total momentum
+                    #total_px = total_lorentz_vector.px
+                    #total_py = total_lorentz_vector.py
+                    #total_pz = total_lorentz_vector.pz
+                    #total_E = total_lorentz_vector.E
+
+                    #sv_x = total_px / total_E
+                    #sv_y = total_py / total_E
+                    #sv_z = total_pz / total_E
+
+                    print(f"EVT {i} SV x = {sv_x}, y = {sv_y}, z = {sv_z}")
+
+                                        
         ax.set_xlabel('Prediction')
         ax.set_ylabel('Eta')
         ax.set_zlabel('Phi')

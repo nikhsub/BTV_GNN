@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 from torch_geometric.nn import GCNConv, GATConv
-from torch_geometric.nn import knn_graph
-import faiss
 
 class GNNModel(torch.nn.Module):
     def __init__(self, indim, outdim, heads=5):
@@ -47,7 +45,7 @@ class GNNModel(torch.nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x_in, edge_index, device):
+    def forward(self, x_in, edge_index):
 
 
         x = self.nn1(x_in)

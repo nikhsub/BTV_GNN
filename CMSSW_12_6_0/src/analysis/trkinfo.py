@@ -144,8 +144,8 @@ for i, evt in enumerate(tree):
     #        low_pt = True
     #if(not low_pt): continue
 
-    high_pt = np.any(np.array(evt.Hadron_pt) > 50)
-    if(high_pt): continue
+    #high_pt = np.any(np.array(evt.Hadron_pt) > 50)
+    #if(high_pt): continue
     
     hads = 0
     for had in range(evt.nHadrons[0]):
