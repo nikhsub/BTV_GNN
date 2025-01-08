@@ -21,20 +21,15 @@ class GNNModel(torch.nn.Module):
         self.gat1 = GATConv(outdim//4, outdim//4, heads=heads, concat=False)
 
         self.gcn2 = GCNConv(3*outdim//8, outdim//2)
-        self.gat2 = GATConv(outdim//2, 3*outdim//4, heads=heads, concat=False)
-
-        self.gcn3 = GCNConv(outdim, outdim)
-        self.gat3 = GATConv(outdim, outdim, heads=heads, concat=False)
+        self.gat2 = GATConv(outdim//2, 7*outdim//8, heads=heads, concat=False)
 
 
         self.bn1 = nn.BatchNorm1d(outdim//4)
-        self.bn2 = nn.BatchNorm1d(3*outdim//4)
-        self.bn3 = nn.BatchNorm1d(outdim)
+        self.bn2 = nn.BatchNorm1d(7*outdim//8)
         self.drop1 = nn.Dropout(p=0.2)
         self.drop2 = nn.Dropout(p=0.25)
-        self.drop3 = nn.Dropout(p=0.30)
 
-        catout = outdim+outdim//8
+        catout = outdim+outdim//4
 
         self.node_pred = nn.Sequential(
             nn.Linear(catout, catout//2),
@@ -69,17 +64,9 @@ class GNNModel(torch.nn.Module):
         x2 = self.gat2(x2, edge_index)
         x2 = self.bn2(x2)
         x2 = F.leaky_relu(x2)
-        x2 = self.drop2(x2)
+        x2 = self.drop1(x2)
 
-        skip2 = torch.cat([x1, x2], dim=1)
-
-        x3 = self.gcn3(skip2, edge_index)
-        x3 = self.gat3(x3, edge_index)
-        x3 = self.bn3(x3)
-        x3 = F.leaky_relu(x3)
-        x3 = self.drop3(x3)
-
-        xf = torch.cat([x, x3], dim=1)
+        xf = torch.cat([x, x1, x2], dim=1)
 
         node_probs = self.node_pred(xf)
 

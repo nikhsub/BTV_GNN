@@ -8,7 +8,7 @@ from ROOT import TFile, TTree
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Submit condor jobs')
     parser.add_argument('-i', "--input", default="", help="The input directory where the analyzer output trees are")
-    parser.add_argument('-o', "--output", default="", help="The main output directory for flat trees")
+    parser.add_argument('-o', "--output", default="", help="The main output directory for log files")
     parser.add_argument('-ec', "--evtchunks", default=3000, type=int, help="Events per chunk")
     return parser.parse_args()
 

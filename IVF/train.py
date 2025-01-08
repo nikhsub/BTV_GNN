@@ -28,14 +28,14 @@ parser = argparse.ArgumentParser("GNN training")
 parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
 parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
 parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
-parser.add_argument("-le", "--load_evt", default="", help="Path to event level validation file")
+parser.add_argument("-le", "--load_evt", default="", help="Absolute path to event level validation file")
 
 args = parser.parse_args()
 glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
-batchsize = 1024
+batchsize = 8000
 
 #LOADING DATA
 train_hads = []
@@ -66,8 +66,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=512)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005)
+model = GNNModel(indim=len(trk_features), outdim=32)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
@@ -92,11 +92,13 @@ def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
         
-        node_embeds1, preds1 = model(data.x, data.edge_index, device)
+        node_embeds1, preds1 = model(data.x, data.edge_index)
 
         cont_loss = torch.tensor(0.0, device=device)
 
-        batch_had_weight = data.had_weight[data.batch].mean().to(device)
+        #batch_had_weight = data.had_weight[data.batch].mean().to(device)
+
+        batch_had_weight = 1
 
         node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
 
@@ -143,7 +145,7 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
             
             edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, preds = model(batch.x, edge_index, device)
+            _, preds = model(batch.x, edge_index)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
             all_labels.extend(batch.y.cpu().numpy())
@@ -195,7 +197,7 @@ def validate(model, val_graphs, device, epoch, k=5):
         with torch.no_grad():
             data = data.to(device)
             edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-            _, preds = model(data.x, edge_index, device)
+            _, preds = model(data.x, edge_index)
             preds = preds.squeeze()
             siginds = data.siginds.cpu().numpy()
             #labels = np.zeros(len(preds))

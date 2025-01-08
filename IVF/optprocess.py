@@ -85,8 +85,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
         if args.train:
             # Process hadrons within the event if in training mode
             
-            bins = [10, 20, 30, 40, 50]
-            had_weights = [4, 3, 2, 1] #10to20, 20to30, 30to40, 40to50
+            #bins = [10, 20, 30, 40, 50]
+            #had_weights = [4, 3, 2, 1] #10to20, 20to30, 30to40, 40to50
 
             for had in np.unique(sig_flag_array[evt]):
                 sig_inds = sig_ind_array[evt][sig_flag_array[evt] == had]
@@ -126,10 +126,11 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
                 edge_index = torch.tensor(np.vstack([source, target]), dtype=torch.int32)
 
                 hadron_weight = 1  # Default weight
-                for i, (lower, upper) in enumerate(zip(bins[:-1], bins[1:])):
-                    if lower <= hadron_pt < upper:
-                        hadron_weight = had_weights[i]
-                        break
+
+                #for i, (lower, upper) in enumerate(zip(bins[:-1], bins[1:])):
+                 #   if lower <= hadron_pt < upper:
+                 #       hadron_weight = had_weights[i]
+                  #      break
 
                 had_data = Data(
                     x=torch.tensor(feature_matrix, dtype=torch.float),

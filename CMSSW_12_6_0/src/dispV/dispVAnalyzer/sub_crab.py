@@ -33,7 +33,7 @@ config.JobType.pluginName = 'Analysis'
 
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
-config.Data.totalUnits = 62
+config.Data.totalUnits = 100
 config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_'+str(timestamp)
 config.Data.publication = False
 

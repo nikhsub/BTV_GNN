@@ -85,7 +85,6 @@ for i, data in enumerate(val_graphs):
 
         # Run ONNX model
         preds_onnx = run_onnx_inference("model.onnx", (data.x, edge_index), session).to(device)
-        warnings.filterwarnings("ignore", category=UserWarning, message=".*VerifyOutputSizes.*")
 
         preds = preds_onnx.squeeze().cpu().numpy()
         siginds = data.siginds.cpu().numpy()
@@ -146,5 +145,3 @@ plt.grid()
 if (args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}hadevts.png")
 elif (not args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}lepevts.png")
 plt.close()
-        
-

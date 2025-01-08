@@ -49,7 +49,7 @@ def scale_features(x, mean, std, eps=1e-6):
 
 val_graphs = train_graphs[:]
 
-model = GNNModel(len(trk_features), 512)
+model = GNNModel(len(trk_features), 32)
 
 model.load_state_dict(torch.load(args.load_model))
 
@@ -74,7 +74,7 @@ if(not args.event):
             data.x = scale_features(data.x)
             edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
     
-            _, preds = model(data.x, edge_index, device)
+            _, preds = model(data.x, edge_index)
     
             print("PREDS", preds)
             print("LABELS", data.y)
@@ -113,7 +113,7 @@ if(args.event):
             #data.x = scale_features(data.x, scale_mean, scale_std)
 
             edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-            _, preds = model(data.x, edge_index, device)
+            _, preds = model(data.x, edge_index)
             preds = preds.squeeze().cpu().numpy()
             siginds = data.siginds.cpu().numpy()
             svinds = data.svinds.cpu().numpy()
