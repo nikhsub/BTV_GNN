@@ -22,53 +22,8 @@ import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
 from sklearn.metrics import roc_curve, auc
-
-parser = argparse.ArgumentParser("GNN training")
-
-parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
-parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
-parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
-parser.add_argument("-le", "--load_evt", default="", help="Absolute path to event level validation file")
-
-args = parser.parse_args()
-glob_test_thres = 0.5
-
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
-
-batchsize = 500
-
-#LOADING DATA
-train_hads = []
-val_evts = []
-if args.load_had != "":
-    if os.path.isdir(args.load_had):
-        print(f"Loading training data from {args.load_had}...")
-        pkl_files = [os.path.join(args.load_had, f) for f in os.listdir(args.load_had) if f.endswith('.pkl')]
-    for pkl_file in pkl_files:
-        print(f"Loading {pkl_file}...")
-        with open(pkl_file, 'rb') as f:
-            train_hads.extend(pickle.load(f))
-
-if args.load_evt != "":
-    print(f"Loading event level data from {args.load_evt}...")
-    with open(args.load_evt, 'rb') as f:
-        val_evts = pickle.load(f)
-
-train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
-val_evts   = val_evts[0:1500]
-
-train_len = int(0.8 * len(train_hads))
-train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
-
-train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=8)
-test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=8)
-
-#DEVICE AND MODEL
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-model = GNNModel(indim=len(trk_features), outdim=32)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
-#scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
+import optuna
+from functools import partial
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     """Class-weighted binary cross-entropy loss"""
@@ -104,7 +59,7 @@ def shuffle_edge_index(edge_index):
     return new_edge_index
 
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
+def train(model, train_loader, optimizer, device, epoch, pos, neg, bce_loss=True):
     model.to(device)
     model.train()
     total_loss=0
@@ -119,7 +74,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         batch_had_weight = 1
         
         node_embeds1, preds1 = model(data.x, data.edge_index)
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=pos, neg_weight=neg)*batch_had_weight
 
         if bce_loss:
             cont_loss = torch.tensor(0.0, device=device)
@@ -246,115 +201,106 @@ def validate(model, val_graphs, device, epoch, k=5):
 
     return roc_auc, avg_loss
 
-best_auc = 0
-patience = 5 
-no_improve = 0
-val_every = 10
+def objective(trial, train_loader, val_loader, device):
+    # Hyperparameter suggestions
+    hidden_dim = trial.suggest_categorical("hidden_dim", [8, 16, 32])
+    num_heads = trial.suggest_categorical("num_heads", [2, 4, 8, 10])
+    dropout_rate = trial.suggest_uniform("dropout", 0.0, 0.5)
+    learning_rate = trial.suggest_loguniform("lr", 1e-5, 1e-3)
+    pos_weight = trial.suggest_uniform("pos_weight", 1.0, 10.0)
+    neg_weight = trial.suggest_uniform("neg_weight", 1.0, 10.0)
+    k = trial.suggest_int("k", 5.0, 12.0)
 
-rolling_bce_loss = []
-stabilization_epochs = 5  # Number of epochs to track for stabilization
-stabilization_tolerance = 0.000  # Threshold for detecting stabilization
-using_bce_loss = True  # Flag to indicate current loss type
+    # Initialize model, optimizer, and loss function
+    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, heads=num_heads, dropout=dropout_rate).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-stats = {
-    "epochs": [],
-    "best_epoch": {
-        "epoch": None,
-        "total_loss": None,
-        "node_loss": None,
-        "cont_loss": None,
-        "bkg_acc": None,
-        "sig_acc": None,
-        "test_auc": None,
-        "test_loss": None,
-        "total_acc": None,
-        "val_auc": None,
-        "val_loss": None
+    best_val_auc = 0
+    patience_counter = 0
 
-    }
-}
+    for epoch in range(30):  # Early stopping after 20 epochs
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, pos_weight, neg_weight)
+        val_auc, _ = validate(model, val_loader, device, epoch, k=k)
 
-for epoch in range(int(args.epochs)):
-    if using_bce_loss:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
-        rolling_bce_loss.append(node_loss)
-        if len(rolling_bce_loss) > stabilization_epochs:
-            rolling_bce_loss.pop(0)
-        if len(rolling_bce_loss) == stabilization_epochs:
-            loss_change = max(rolling_bce_loss) - min(rolling_bce_loss)
-            if loss_change < stabilization_tolerance:
-                print(f"Switching to contrastive loss at epoch {epoch + 1}.")
-                using_bce_loss = False
-    else:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=False)
-
-
-    bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
-    sum_acc = bkg_acc + sig_acc
-
-    val_auc = -1
-    val_loss = -1
-
-    if (epoch+1) % val_every == 0:
-        print(f"Validating at epoch {epoch}...")
-        val_auc, val_loss = validate(model, val_evts, device, epoch)
-        print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
-
-        if val_auc > best_auc:
-            best_auc = val_auc
-            no_improve = 0
-
-            stats["best_epoch"] = {
-                "epoch": epoch + 1,
-                "total_loss": tot_loss,
-                "node_loss": node_loss,
-                "cont_loss": cont_loss,
-                "bkg_acc": bkg_acc,
-                "sig_acc": sig_acc,
-                "test_auc": test_auc,
-                "test_loss": test_loss,
-                "total_acc": sum_acc,
-                "val_auc": val_auc,
-                "val_loss": val_loss
-            }
-
-            save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
-            torch.save(model.state_dict(), save_path)
-            print(f"Model saved to {save_path}")
-
+        if val_auc > best_val_auc:
+            best_val_auc = val_auc
+            patience_counter = 0
         else:
-            no_improve += 1
-            print(f"Validation AUC did not improve after {val_every} epochs")
+            patience_counter += 1
 
-        if no_improve >= patience:
-            print(f"Early stopping triggered after {patience*val_every} epochs of no improvement.")
+        if patience_counter >= 5:  # Stop if no improvement for 5 epochs
             break
 
-    epoch_stats = {
-        "epoch": epoch + 1,
-        "total_loss": tot_loss,
-        "node_loss": node_loss,
-        "cont_loss": cont_loss,
-        "bkg_acc": bkg_acc,
-        "sig_acc": sig_acc,
-        "test_auc": test_auc,
-        "test_loss": test_loss,
-        "total_acc": sum_acc,
-        "val_auc": val_auc,
-        "val_loss": val_loss
-    }
-    stats["epochs"].append(epoch_stats)
+    return best_val_auc
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("GNN training")
+
+    parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
+    parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
+    parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
+    parser.add_argument("-le", "--load_evt", default="", help="Absolute path to event level validation file")
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Cont Loss: {cont_loss:.4f}")
-    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
-
-
-    if(epoch> 0 and epoch%10==0):
-        savepath = os.path.join("model_files", f"model_{args.modeltag}_e{epoch}.pth")
-        torch.save(model.state_dict(), savepath)
-        print(f"Model saved to {savepath}")
-
+    args = parser.parse_args()
+    glob_test_thres = 0.5
     
-    with open("training_stats_"+args.modeltag+".json", "w") as f:
-        json.dump(stats, f, indent=4)
+    trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+    
+    batchsize = 500
+    
+    #LOADING DATA
+    train_hads = []
+    val_evts = []
+    if args.load_had != "":
+        if os.path.isdir(args.load_had):
+            print(f"Loading training data from {args.load_had}...")
+            pkl_files = [os.path.join(args.load_had, f) for f in os.listdir(args.load_had) if f.endswith('.pkl')]
+        for pkl_file in pkl_files:
+            print(f"Loading {pkl_file}...")
+            with open(pkl_file, 'rb') as f:
+                train_hads.extend(pickle.load(f))
+    
+    if args.load_evt != "":
+        print(f"Loading event level data from {args.load_evt}...")
+        with open(args.load_evt, 'rb') as f:
+            val_evts = pickle.load(f)
+    
+    train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
+    val_evts   = val_evts[0:1500]
+    
+    train_len = int(1 * len(train_hads))
+    train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
+    
+    train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=8)
+    #test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=8)
+    
+    #DEVICE AND MODEL
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    study = optuna.create_study(direction="maximize")  # Optimize validation AUC
+    study.optimize(partial(objective, train_loader=train_loader, val_loader=val_evts, device=device),n_trials=50)
+    
+    print("Best hyperparameters:", study.best_params)
+    print("Best validation AUC:", study.best_value)
+
+    with open("best_params_"+args.modeltag+".json", "w") as f:
+        json.dump({"best_params": study.best_params, "best_value": study.best_value}, f, indent=4)
+
+
+    print(f"Best hyperparameters saved")
+    
+    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["lr"])
+
+    best_val_auc = 0.0  # Track the best validation AUC
+    best_model_path = "best_hyperopt_model_"+args.modeltag+".pth"  # Path to save the best model
+
+    for epoch in range(int(args.epochs)):
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, study.best_params["pos_weight"], study.best_params["neg_weight"])
+        val_auc, _ = validate(model, val_evts, device, epoch, k=study.best_params["k"])
+        print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Val AUC = {val_auc:.4f}")
+
+        if val_auc > best_val_auc:
+            best_val_auc = val_auc
+            torch.save(model.state_dict(), best_model_path)
+            print(f"New best model saved with Val AUC = {best_val_auc:.4f}")

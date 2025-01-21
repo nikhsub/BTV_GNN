@@ -12,6 +12,7 @@ parser.add_argument("-i", "--inp", default="test_ntuple.root", help="Input root 
 parser.add_argument("-o", "--out", default="testfile", help="Name of output ROOT file")
 parser.add_argument("-s", "--start", type=int, help="Start index for events")
 parser.add_argument("-e", "--end", type=int, help="End index for events")
+parser.add_argument("-lpt", "--lowpt", default=False, action="store_true", help="Apply low pt cut?")
 
 args = parser.parse_args()
 
@@ -143,9 +144,10 @@ for i, evt in enumerate(tree):
     #    if(evt.Hadron_pt[had] < 50):
     #        low_pt = True
     #if(not low_pt): continue
-
-    #high_pt = np.any(np.array(evt.Hadron_pt) > 50)
-    #if(high_pt): continue
+    
+    if(args.lowpt):
+        high_pt = np.any(np.array(evt.Hadron_pt) > 20)
+        if(high_pt): continue
     
     hads = 0
     for had in range(evt.nHadrons[0]):

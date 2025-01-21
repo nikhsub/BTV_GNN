@@ -2,8 +2,8 @@
 
 # Directory paths
 #INPUT_DIR="/store/group/lpcljm/nvenkata/BTVH/toprocfiles/test"    # Set your input directory containing .root files
-INPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/lowpt_toproc"
-OUTPUT_DIR="files/training/ttbar_lep_lowpt20_1501"  # Set your output directory for .pkl files
+INPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/evtproc"
+OUTPUT_DIR="files/training/ttbar_lep_evt_2001"  # Set your output directory for .pkl files
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""
 
@@ -26,10 +26,10 @@ for file_path in "$INPUT_DIR"/*.root; do
   echo "$mod_file_path"
 
   # Run the processing script with the required arguments
-  python optprocess.py -d "$mod_file_path" -st "$save_tag" -s "$START_EVT" -e "$END_EVT" -t #Add -t for training!!!
+  python process_evt.py -d "$mod_file_path" -st "$save_tag" -s "$START_EVT" -e "$END_EVT"
 
   # Move the generated .pkl file to the output directory
-  mv "haddata_${save_tag}.pkl" "$OUTPUT_DIR/"
+  mv "eventdata_${save_tag}.pkl" "$OUTPUT_DIR/"
 done
 
 echo "Processing complete. All .pkl files have been moved to $OUTPUT_DIR."

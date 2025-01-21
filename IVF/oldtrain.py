@@ -35,7 +35,7 @@ glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
-batchsize = 500
+batchsize = 6000
 
 #LOADING DATA
 train_hads = []
@@ -55,7 +55,7 @@ if args.load_evt != "":
         val_evts = pickle.load(f)
 
 train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
-val_evts   = val_evts[0:1500]
+val_evts   = val_evts[0:1000]
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
@@ -70,7 +70,7 @@ model = GNNModel(indim=len(trk_features), outdim=32)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
-def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
+def class_weighted_bce(preds, labels, pos_weight=3.0, neg_weight=1.0):
     """Class-weighted binary cross-entropy loss"""
     pos_weight = torch.tensor(pos_weight, device=preds.device)
     neg_weight = torch.tensor(neg_weight, device=preds.device)
@@ -78,33 +78,8 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def contrastive_loss(x1, x2, temperature=0.5):
-    """Compute the contrastive loss"""
-    x1 = F.normalize(x1, dim=1)
-    x2 = F.normalize(x2, dim=1)
-
-    batch_size = x1.size(0)
-
-    similarity_matrix = torch.mm(x1, x2.t()) / temperature
-
-    labels = torch.arange(batch_size).to(x1.device)
-    loss = F.cross_entropy(similarity_matrix, labels)
-
-    return loss
-
-def shuffle_edge_index(edge_index):
-    num_edges = edge_index.size(1)
-
-    # Shuffle the target nodes (row 1) while keeping the sources (row 0) the same
-    shuffled_targets = edge_index[1, torch.randperm(num_edges, device=edge_index.device)]
-
-    # Combine the original sources with the shuffled targets
-    new_edge_index = torch.stack([edge_index[0], shuffled_targets], dim=0)
-
-    return new_edge_index
-
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
+def train(model, train_loader, optimizer, device, epoch, drop_rate=0.5, temp=0.3, scale=2):
     model.to(device)
     model.train()
     total_loss=0
@@ -116,21 +91,18 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
 
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
-        batch_had_weight = 1
         
         node_embeds1, preds1 = model(data.x, data.edge_index)
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
 
-        if bce_loss:
-            cont_loss = torch.tensor(0.0, device=device)
-        else:
-            edge_index2 = shuffle_edge_index(data.edge_index).to(device)
-            node_embeds2, preds2 = model(data.x, edge_index2)
-            cont_loss = contrastive_loss(node_embeds1, node_embeds2)
+        cont_loss = torch.tensor(0.0, device=device)
 
         #batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
-        loss = (cont_loss * 0.05) + node_loss
+        batch_had_weight = 1
+
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
+
+        loss = cont_loss + node_loss
 
         loss.backward()
         optimizer.step()
@@ -145,6 +117,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     avg_cont_loss = total_cont_loss / len(train_loader)
 
     #print(f"No seed hadrons: {nosigseeds}")
+
     return avg_loss, avg_node_loss, avg_cont_loss
 
 #TEST
@@ -246,15 +219,12 @@ def validate(model, val_graphs, device, epoch, k=5):
 
     return roc_auc, avg_loss
 
+
+
 best_auc = 0
 patience = 5 
 no_improve = 0
 val_every = 10
-
-rolling_bce_loss = []
-stabilization_epochs = 5  # Number of epochs to track for stabilization
-stabilization_tolerance = 0.000  # Threshold for detecting stabilization
-using_bce_loss = True  # Flag to indicate current loss type
 
 stats = {
     "epochs": [],
@@ -275,20 +245,7 @@ stats = {
 }
 
 for epoch in range(int(args.epochs)):
-    if using_bce_loss:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
-        rolling_bce_loss.append(node_loss)
-        if len(rolling_bce_loss) > stabilization_epochs:
-            rolling_bce_loss.pop(0)
-        if len(rolling_bce_loss) == stabilization_epochs:
-            loss_change = max(rolling_bce_loss) - min(rolling_bce_loss)
-            if loss_change < stabilization_tolerance:
-                print(f"Switching to contrastive loss at epoch {epoch + 1}.")
-                using_bce_loss = False
-    else:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=False)
-
-
+    tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch)
     bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
     sum_acc = bkg_acc + sig_acc
 
@@ -345,7 +302,7 @@ for epoch in range(int(args.epochs)):
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Cont Loss: {cont_loss:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}")
     print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
 
 
