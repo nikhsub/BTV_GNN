@@ -4,7 +4,7 @@ import subprocess
 
 # Configuration
 watch_directory = "/uscms/home/nvenkata/nobackup/BTV/CMSSW_12_6_0/src/analysis"  # Directory to monitor
-eos_directory = "/store/group/lpcljm/nvenkata/BTVH/toprocfiles"   # EOS directory
+eos_directory = "/store/group/lpcljm/nvenkata/BTVH/evt_toprocfiles"   # EOS directory
 polling_interval = 300                        # Time in seconds between directory checks
 
 def transfer_and_remove(file_path, eos_directory):

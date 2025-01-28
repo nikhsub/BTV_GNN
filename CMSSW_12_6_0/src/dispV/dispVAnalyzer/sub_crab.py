@@ -34,7 +34,7 @@ config.JobType.pluginName = 'Analysis'
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
 config.Data.totalUnits = 100
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_'+str(timestamp)
+config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_evttrain_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -65,12 +65,35 @@ def sub_crab_job():
 
     #datasetname = getstatusoutput("das_client --query='dataset=/splitSUSY_M1000_"+str(mass)+"_ctau"+str(life)+"p0_TuneCP2_13TeV-pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*'")[1].split("\n")[0]
     #datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+
     datasetname = getstatusoutput("das_client --query='dataset='/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+
+    dataset_query = "/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM"
+    files_query = f"file dataset={dataset_query}"
+    status, files = getstatusoutput(f"dasgoclient --query='{files_query}'")
+    
+    if status != 0:
+        print("Error querying DAS for files:", files)
+        return
+    
+    # Filter files from 100 to 200 (zero-indexed)
+    file_list = files.split('\n')[100:120]
+    if not file_list:
+        print("No files found in the specified range (100–120).")
+        return
+
+    # Save the filtered file list to a local text file (optional)
+    with open("filelist_100_120.txt", "w") as f:
+        for file in file_list:
+            f.write(file + '\n')
+
+    config.Data.userInputFiles = file_list
     config.General.requestName = 'MC_ttbarlep_'+str(timestamp)
     config.JobType.psetName = 'Events_cfg.py'
     config.Data.outputDatasetTag = 'MC_ttbarlep_'+str(timestamp)
-    config.Data.inputDataset = datasetname
-    print(datasetname)
+
+    #config.Data.inputDataset = datasetname
+    #print(datasetname)
     #submit(config)
     p = Process(target=submit, args=(config,))
     p.start()

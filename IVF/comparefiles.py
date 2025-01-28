@@ -45,7 +45,7 @@ def evaluate(file, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            edge_index = knn_graph(data.x, k=5, batch=None, loop=False).to(device)
+            edge_index = knn_graph(data.x, k=6, batch=None, loop=False).to(device)
             _, preds = model(data.x, edge_index)
             preds = preds.squeeze().cpu().numpy()
 
@@ -80,7 +80,7 @@ def evaluate(file, model, device):
 
     return fpr, tpr, roc_auc, sv_tpr, sv_fpr
 
-model = GNNModel(len(trk_features), 32, heads=8, dropout=0.3865)  # Adjust input_dim if needed
+model = GNNModel(len(trk_features), 16, heads=8, dropout=0.2773)  # Adjust input_dim if needed
 model.load_state_dict(torch.load(args.load_model))
 model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

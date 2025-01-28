@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Directory paths
-#INPUT_DIR="/store/group/lpcljm/nvenkata/BTVH/toprocfiles/test"    # Set your input directory containing .root files
-INPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/evtproc"
-OUTPUT_DIR="files/training/ttbar_lep_evt_2001"  # Set your output directory for .pkl files
-#EOS_PREFIX="root://cmseos.fnal.gov/"
-EOS_PREFIX=""
+INPUT_DIR="/store/group/lpcljm/nvenkata/BTVH/evt_toprocfiles"    # Set your input directory containing .root files
+#INPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/evtproc"
+OUTPUT_DIR="files/training/ttbar_lep_evt_2301"  # Set your output directory for .pkl files
+EOS_PREFIX="root://cmseos.fnal.gov/"
+#EOS_PREFIX=""
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -16,8 +16,8 @@ END_EVT=-1
 # Loop through all ROOT files in the input directory
 #for file_path in "$INPUT_DIR"/*.root; do
   # Extract file name without extension and set it as the save tag
-#for file_path in $(xrdfsls "$INPUT_DIR" | grep '\.root$'); do
-for file_path in "$INPUT_DIR"/*.root; do
+for file_path in $(xrdfsls "$INPUT_DIR" | grep '\.root$'); do
+#for file_path in "$INPUT_DIR"/*.root; do
   filename=$(basename "$file_path")
   save_tag="${filename%.root}"
 

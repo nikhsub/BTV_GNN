@@ -66,8 +66,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=16, heads=8, dropout=0.277)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.00087) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -119,7 +119,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         batch_had_weight = 1
         
         node_embeds1, preds1 = model(data.x, data.edge_index)
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1))*batch_had_weight
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=5, neg_weight=1)*batch_had_weight
 
         if bce_loss:
             cont_loss = torch.tensor(0.0, device=device)
@@ -148,7 +148,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     return avg_loss, avg_node_loss, avg_cont_loss
 
 #TEST
-def test(model, test_loader, device, epoch, k=5, thres=0.5):
+def test(model, test_loader, device, epoch, k=6, thres=0.5):
     model.to(device)
     model.eval()
 
@@ -211,7 +211,7 @@ def test(model, test_loader, device, epoch, k=5, thres=0.5):
 
     return bkg_accuracy, sig_accuracy, avg_loss, auc
 
-def validate(model, val_graphs, device, epoch, k=5):
+def validate(model, val_graphs, device, epoch, k=6):
     model.to(device)
     model.eval()
 
