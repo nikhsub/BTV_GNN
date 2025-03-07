@@ -33,8 +33,8 @@ config.JobType.pluginName = 'Analysis'
 
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
-config.Data.totalUnits = 100
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_evttrain_'+str(timestamp)
+config.Data.totalUnits = 120
+config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTVH/ttbarlep_120files_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -77,13 +77,13 @@ def sub_crab_job():
         return
     
     # Filter files from 100 to 200 (zero-indexed)
-    file_list = files.split('\n')[100:120]
+    file_list = files.split('\n')[0:120]
     if not file_list:
-        print("No files found in the specified range (100–120).")
+        print("No files found in the specified range (0–120).")
         return
 
     # Save the filtered file list to a local text file (optional)
-    with open("filelist_100_120.txt", "w") as f:
+    with open("filelist_0_120.txt", "w") as f:
         for file in file_list:
             f.write(file + '\n')
 

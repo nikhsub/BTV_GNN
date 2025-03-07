@@ -68,7 +68,7 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       virtual void endJob() override;
       std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
       int checkPDG(int abs_pdg);
-
+      bool hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds);
 
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;

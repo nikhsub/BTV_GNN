@@ -91,6 +91,32 @@ int DemoAnalyzer::checkPDG(int abs_pdg)
 
 }
 
+bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds)
+{
+    // Base case: If the particle is null, return false
+    if (!particle) {
+        return false;
+    }
+
+    // Loop over all daughters
+    for (size_t i = 0; i < particle->numberOfDaughters(); i++) {
+        const reco::Candidate* daughter = particle->daughter(i);
+        
+        // Check if the current daughter is in the D hadron list
+        if (daughter && std::find(pdgIds.begin(), pdgIds.end(), daughter->pdgId()) != pdgIds.end()) {
+            return true; // Found a D hadron anywhere in the decay chain
+        }
+
+        // Recursively check deeper in the decay chain
+        if (hasDescendantWithId(daughter, pdgIds)) {
+            return true;
+        }
+    }
+
+    return false; // No D hadron found in the decay chain
+}
+
+
 
 
 //
@@ -140,10 +166,10 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   trk_nValidPixel.clear();
   trk_nValidStrip.clear();
 
-  njets.clear();
-  jet_pt.clear();
-  jet_eta.clear();
-  jet_phi.clear();
+  //njets.clear();
+  //jet_pt.clear();
+  //jet_eta.clear();
+  //jet_phi.clear();
 
   nSVs.clear();
   SV_x.clear();
@@ -265,6 +291,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<int> temp_Daughters_charge;
    std::vector<int> temp_Daughters_flag;
    std::vector<int> temp_Daughters_flav;
+   
+   std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
+                                 4122, 4222, 4212, 4112, 4232, 4132, 4332, 4412, 4422, 4432, 4444}; //Charmed Baryons   
+
+
    for(size_t i=0; i< merged->size();i++)
    { //prune loop
 	temp_Daughters_pt.clear();
@@ -277,6 +308,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	if(!(prun_part->pt() > 10 && std::abs(prun_part->eta()) < 2.5)) continue;
 	int hadPDG = checkPDG(std::abs(prun_part->pdgId()));
 	int had_parPDG = checkPDG(std::abs(prun_part->mother(0)->pdgId()));
+	if(hadPDG == 1 && hasDescendantWithId(prun_part, pdgList_D)) continue; //skipping B hadrons that decay to D hadrons
 	if(hadPDG > 0 && !(hadPDG == had_parPDG))
 	{ //if pdg
 		nhads++;
@@ -417,10 +449,10 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("trk_nValidStrip", &trk_nValidStrip);
 	tree->Branch("trk_charge", &trk_charge);
 
-	tree->Branch("nJets", &njets);
-	tree->Branch("jet_pt", &jet_pt);
-        tree->Branch("jet_eta", &jet_eta);
-        tree->Branch("jet_phi", &jet_phi);
+	//tree->Branch("nJets", &njets);
+	//tree->Branch("jet_pt", &jet_pt);
+        //tree->Branch("jet_eta", &jet_eta);
+        //tree->Branch("jet_phi", &jet_phi);
 
 	tree->Branch("nSVs", &nSVs);
 	tree->Branch("SV_x", &SV_x);

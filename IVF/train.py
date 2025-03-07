@@ -21,7 +21,7 @@ from conmodel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, precision_recall_curve, auc
 
 parser = argparse.ArgumentParser("GNN training")
 
@@ -66,7 +66,7 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=16, heads=8, dropout=0.277)
+model = GNNModel(indim=len(trk_features), outdim=16, heads=4, dropout=0.354)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00087) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
@@ -77,6 +77,34 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     weights = torch.where(labels == 1, pos_weight, neg_weight)
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
+
+def target_eff_loss(preds, labels, target_tpr=0.7, scale=0.1):
+    preds = preds.view(-1)  # Shape [N]
+    labels = labels.view(-1)  # Shape [N]
+
+    sorted_indices = torch.argsort(preds, descending=True)
+    sorted_preds = preds[sorted_indices]
+    sorted_labels = labels[sorted_indices]
+
+    # Cumulative sum for signal and background counts
+    cumsum_labels = torch.cumsum(sorted_labels, dim=0)
+    total_signal = cumsum_labels[-1]
+    total_background = len(labels) - total_signal
+
+    # Find threshold index for target TPR
+    target_index = torch.argmax((cumsum_labels >= target_tpr * total_signal).to(torch.int64))
+    threshold = sorted_preds[target_index]
+
+    # Calculate FPR and Precision at this threshold
+    tp = cumsum_labels[target_index]
+    fp = (target_index + 1) - tp
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    fpr = fp / total_background if total_background > 0 else 0
+    bg_rejection = 1 - fpr
+
+    loss = -scale*(precision+bg_rejection)
+    return loss
+
 
 def contrastive_loss(x1, x2, temperature=0.5):
     """Compute the contrastive loss"""
@@ -110,6 +138,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     total_loss=0
     total_node_loss = 0
     total_cont_loss = 0
+    total_eff_loss  = 0
 
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
         data = data.to(device)
@@ -119,7 +148,8 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         batch_had_weight = 1
         
         node_embeds1, preds1 = model(data.x, data.edge_index)
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=5, neg_weight=1)*batch_had_weight
+        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=9, neg_weight=5)*batch_had_weight
+        eff_loss = target_eff_loss(preds1, data.y.float().unsqueeze(1), target_tpr=0.70, scale=0.1)
 
         if bce_loss:
             cont_loss = torch.tensor(0.0, device=device)
@@ -130,7 +160,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
 
         #batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
-        loss = (cont_loss * 0.05) + node_loss
+        loss = (cont_loss * 0.05) + node_loss + eff_loss
 
         loss.backward()
         optimizer.step()
@@ -139,16 +169,18 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         total_loss      += loss.item()
         total_node_loss += node_loss.item()
         total_cont_loss += cont_loss.item()
+        total_eff_loss  += eff_loss.item()
 
     avg_loss = total_loss / len(train_loader)
     avg_node_loss = total_node_loss / len(train_loader)
     avg_cont_loss = total_cont_loss / len(train_loader)
+    avg_eff_loss  = total_eff_loss / len(train_loader)
 
     #print(f"No seed hadrons: {nosigseeds}")
-    return avg_loss, avg_node_loss, avg_cont_loss
+    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss
 
 #TEST
-def test(model, test_loader, device, epoch, k=6, thres=0.5):
+def test(model, test_loader, device, epoch, k=11, thres=0.5):
     model.to(device)
     model.eval()
 
@@ -211,7 +243,7 @@ def test(model, test_loader, device, epoch, k=6, thres=0.5):
 
     return bkg_accuracy, sig_accuracy, avg_loss, auc
 
-def validate(model, val_graphs, device, epoch, k=6):
+def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     model.to(device)
     model.eval()
 
@@ -239,14 +271,24 @@ def validate(model, val_graphs, device, epoch, k=6):
 
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
-    fpr, tpr, thresholds = roc_curve(all_labels, all_preds)
+
+    fpr, tpr, thresholds_roc = roc_curve(all_labels, all_preds)
     roc_auc = auc(fpr, tpr)
+
+    precision, recall, thresholds = precision_recall_curve(all_labels, all_preds)
+    pr_auc = auc(recall, precision)
+
+    target_idx = np.argmin(np.abs(tpr - target_sigeff))
+    threshold_at_target_eff = thresholds_roc[target_idx]
+
+    precision_at_sigeff = precision[np.argmin(np.abs(recall - tpr[target_idx]))]
+    bg_rejection_at_sigeff = 1 - fpr[target_idx]  # 1 - FPR
 
     avg_loss = total_loss / num_samps if num_samps > 0 else 0
 
-    return roc_auc, avg_loss
+    return roc_auc, pr_auc, avg_loss, precision_at_sigeff, bg_rejection_at_sigeff
 
-best_auc = 0
+best_metric = 0
 patience = 5 
 no_improve = 0
 val_every = 10
@@ -263,20 +305,24 @@ stats = {
         "total_loss": None,
         "node_loss": None,
         "cont_loss": None,
+        "eff_loss": None,
         "bkg_acc": None,
         "sig_acc": None,
         "test_auc": None,
         "test_loss": None,
         "total_acc": None,
         "val_auc": None,
-        "val_loss": None
-
+        "val_loss": None,
+        "pr_auc": None,
+        "precision": None,
+        "bg_rejection": None,
+        "metric": None
     }
 }
 
 for epoch in range(int(args.epochs)):
     if using_bce_loss:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
+        tot_loss, node_loss, cont_loss, eff_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
         rolling_bce_loss.append(node_loss)
         if len(rolling_bce_loss) > stabilization_epochs:
             rolling_bce_loss.pop(0)
@@ -286,22 +332,28 @@ for epoch in range(int(args.epochs)):
                 print(f"Switching to contrastive loss at epoch {epoch + 1}.")
                 using_bce_loss = False
     else:
-        tot_loss, node_loss, cont_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=False)
+        tot_loss, node_loss, cont_loss, eff_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=False)
 
 
-    bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, thres=glob_test_thres)
+    bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, k=11, thres=glob_test_thres)
     sum_acc = bkg_acc + sig_acc
 
     val_auc = -1
     val_loss = -1
+    pr_auc = -1
+    prec = -1
+    bg_rej = -1
+    metric = -1
 
     if (epoch+1) % val_every == 0:
         print(f"Validating at epoch {epoch}...")
-        val_auc, val_loss = validate(model, val_evts, device, epoch)
+        val_auc, pr_auc, val_loss, prec, bg_rej = validate(model, val_evts, device, epoch, k=11, target_sigeff=0.70)
         print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
 
-        if val_auc > best_auc:
-            best_auc = val_auc
+        metric = prec + bg_rej
+
+        if metric > best_metric:
+            best_metric = metric
             no_improve = 0
 
             stats["best_epoch"] = {
@@ -309,13 +361,18 @@ for epoch in range(int(args.epochs)):
                 "total_loss": tot_loss,
                 "node_loss": node_loss,
                 "cont_loss": cont_loss,
+                "eff_loss": eff_loss,
                 "bkg_acc": bkg_acc,
                 "sig_acc": sig_acc,
                 "test_auc": test_auc,
                 "test_loss": test_loss,
                 "total_acc": sum_acc,
                 "val_auc": val_auc,
-                "val_loss": val_loss
+                "val_loss": val_loss,
+                "pr_auc": pr_auc,
+                "precision": prec,
+                "bg_rejection": bg_rej,
+                "metric": metric
             }
 
             save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
@@ -324,7 +381,7 @@ for epoch in range(int(args.epochs)):
 
         else:
             no_improve += 1
-            print(f"Validation AUC did not improve after {val_every} epochs")
+            print(f"Validation metric did not improve after {val_every} epochs")
 
         if no_improve >= patience:
             print(f"Early stopping triggered after {patience*val_every} epochs of no improvement.")
@@ -335,17 +392,22 @@ for epoch in range(int(args.epochs)):
         "total_loss": tot_loss,
         "node_loss": node_loss,
         "cont_loss": cont_loss,
+        "eff_loss": eff_loss,
         "bkg_acc": bkg_acc,
         "sig_acc": sig_acc,
         "test_auc": test_auc,
         "test_loss": test_loss,
         "total_acc": sum_acc,
         "val_auc": val_auc,
-        "val_loss": val_loss
+        "val_loss": val_loss,
+        "pr_auc": pr_auc,
+        "precision": prec,
+        "bg_rejection": bg_rej,
+        "metric": metric
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Cont Loss: {cont_loss:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Eff Loss: {eff_loss:.4f}")
     print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
 
 

@@ -84,6 +84,9 @@ outtree.Branch("trk_nValidPixel", trk_nValidPixel)
 outtree.Branch("trk_nValidStrip", trk_nValidStrip)
 outtree.Branch("trk_charge", trk_charge)
 
+#outtree.Branch("delr", delr)
+#outtree.Branch("ptrat", ptrat)
+
 def delta_phi(phi1, phi2):
     """
     Calculate the difference in phi between two angles.
@@ -98,13 +101,11 @@ def delta_eta(eta1, eta2):
     return eta2 - eta1
 
 def delta_R(eta1, phi1, eta2, phi2):
-    """
-    Calculate the distance in eta-phi space.
-    """
-    deta = delta_eta(eta1[:, None], eta2)
-    dphi = delta_phi(phi1[:, None], phi2)
+    """Efficiently compute ΔR using vectorized operations."""
+    deta = eta1[:, None] - eta2  # Vectorized subtraction
+    dphi = np.abs(phi1[:, None] - phi2)
+    dphi[dphi > np.pi] -= 2 * np.pi  # Ensure dphi is in [-π, π]
     return np.sqrt(deta**2 + dphi**2)
-
 
 for i, evt in enumerate(tree):
     if i < start_index:
@@ -124,6 +125,8 @@ for i, evt in enumerate(tree):
     bkg_flag.clear()
     sig_flav.clear()
     SVtrk_ind.clear()
+    #delr.clear()
+    #ptrat.clear()
 
     trk_ip2d.clear();
     trk_ip3d.clear();
@@ -191,13 +194,12 @@ for i, evt in enumerate(tree):
      
 
     if(nds>0):
-        trk_eta_array = np.array([evt.trk_eta[trk] for trk in range(evt.nTrks[0])])
-        trk_phi_array = np.array([evt.trk_phi[trk] for trk in range(evt.nTrks[0])])
-        d_eta_array = np.array([evt.Daughters_eta[d] for d in range(nds)])
-        d_phi_array = np.array([evt.Daughters_phi[d] for d in range(nds)])
-
+        trk_eta_array = np.array(evt.trk_eta[:evt.nTrks[0]])  # Direct slicing
+        trk_phi_array = np.array(evt.trk_phi[:evt.nTrks[0]])
+        d_eta_array = np.array(evt.Daughters_eta[:nds])
+        d_phi_array = np.array(evt.Daughters_phi[:nds])
+        
         delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
-
 
         for d in range(nds):
             trk_mindr = 1e6
@@ -206,6 +208,7 @@ for i, evt in enumerate(tree):
             trk_ptrat = -1
             tind = -1
             bkgcount = 0
+            rand_bkgcount = 0
             for trk in range(evt.nTrks[0]):
                 if(d==0):
                     if(evt.trk_pt[trk] > 0.8 and abs(evt.trk_ip3d[trk]) > 0.005 and abs(evt.trk_ip2dsig[trk]) > 1.2):
@@ -216,15 +219,21 @@ for i, evt in enumerate(tree):
                 if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
                 delR = delta_R_matrix[trk, d]
                 temp_ptrat = (evt.trk_pt[trk])/(evt.Daughters_pt[d])
-                if (delR <= trk_mindr and delR< 0.02 and temp_ptrat > 0.8 and temp_ptrat < 1.2):
+                if (delR <= trk_mindr and delR< 0.02 and temp_ptrat >= 0.8 and temp_ptrat <= 1.2):
                     trk_mindr = delR
                     trk_ptrat = temp_ptrat
                     tind = trk
 
-                elif (bkgcount < 15 and delR >= 0.02 and delR < 0.6):
+                elif (bkgcount <= 15 and delR < 0.02 and ((temp_ptrat >=0.6 and temp_ptrat <0.8) or (temp_ptrat > 1.2 and temp_ptrat <=1.4))):
                     bkg_ind.push_back(trk)
                     bkg_flag.push_back(evt.Daughters_flag[d])
                     bkgcount+=1;
+                
+                elif(rand_bkgcount <= 5 and delR > 0.04):
+                    bkg_ind.push_back(trk)
+                    bkg_flag.push_back(evt.Daughters_flag[d])
+                    rand_bkgcount+=1; 
+
             
             if(trk_ptrat > 0):
                 trk_flag = evt.Daughters_flag[d] #Which hadron it comes from
@@ -232,6 +241,8 @@ for i, evt in enumerate(tree):
                 sig_ind.push_back(tind)
                 sig_flag.push_back(trk_flag)
                 sig_flav.push_back(trk_flav)
+                #delr.push_back(trk_mindr)
+                #ptrat.push_back(trk_ptrat)
                 #tinds.append(tind)
 
     outtree.Fill()

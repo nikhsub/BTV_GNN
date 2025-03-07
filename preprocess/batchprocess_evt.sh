@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Directory paths
-INPUT_DIR="/store/group/lpcljm/nvenkata/BTVH/toproc"    # Set your input directory containing .root files
-#INPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/evtproc"
-OUTPUT_DIR="files/testing/ttbar_had_testing_0402"  # Set your output directory for .pkl files
+#INPUT_DIR="/store/group/lpcljm/nvenkata/BTVH/toprocfiles/test"    # Set your input directory containing .root files
+INPUT_DIR="/uscms/home/nvenkata/nobackup/higgs+c/preprocess/toproc"
+OUTPUT_DIR="/uscms/home/nvenkata/nobackup/higgs+c/ML_scripts/files/training/hplus_evt_train_deltaR_2702"  # Set your output directory for .pkl files
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""
 
@@ -29,7 +29,7 @@ for file_path in "$INPUT_DIR"/*.root; do
   python process_evt.py -d "$mod_file_path" -st "$save_tag" -s "$START_EVT" -e "$END_EVT"
 
   # Move the generated .pkl file to the output directory
-  mv "eventdata_${save_tag}.pkl" "$OUTPUT_DIR/"
+  mv "evttraindata_${save_tag}.pkl" "$OUTPUT_DIR/"
 done
 
 echo "Processing complete. All .pkl files have been moved to $OUTPUT_DIR."

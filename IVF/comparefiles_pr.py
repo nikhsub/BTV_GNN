@@ -46,7 +46,7 @@ def evaluate(file, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            edge_index = knn_graph(data.x, k=11, batch=None, loop=False).to(device)
+            edge_index = knn_graph(data.x, k=6, batch=None, loop=False).to(device)
             _, preds = model(data.x, edge_index)
             preds = preds.squeeze().cpu().numpy()
 
@@ -73,13 +73,13 @@ def evaluate(file, model, device):
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
 
-    fpr, tpr, _ = roc_curve(all_labels, all_preds)
-    roc_auc = auc(fpr, tpr)
+    precision, recall, _ = precision_recall_curve(all_labels, all_preds)
+    pr_auc = average_precision_score(all_labels, all_preds)
 
     sv_tpr = sv_tp / (sv_tp + sv_fn) if (sv_tp + sv_fn) > 0 else 0
-    sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
+    sv_precision = sv_tp / (sv_tp + sv_fp) if (sv_tp + sv_fp) > 0 else 0
 
-    return fpr, tpr, roc_auc, sv_tpr, sv_fpr
+    return precision, recall, pr_auc, sv_precision, sv_tpr #Recall is the same thing as tpr
 
 model = GNNModel(len(trk_features), 16, heads=4, dropout=0.354)  # Adjust input_dim if needed
 model.load_state_dict(torch.load(args.load_model))
@@ -88,23 +88,23 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 
 # Evaluate both files
-fpr1, tpr1, auc1, sv_tpr1, sv_fpr1 = evaluate(args.file1, model, device)
-fpr2, tpr2, auc2, sv_tpr2, sv_fpr2 = evaluate(args.file2, model, device)
+p1, r1, auc1, sv_p1, sv_r1 = evaluate(args.file1, model, device)
+p2, r2, auc2, sv_p2, sv_r2 = evaluate(args.file2, model, device)
 
 # Plot the ROC curves
 plt.figure(figsize=(10, 8))
-plt.plot(tpr1, fpr1, label=f"{args.tag1} (AUC = {auc1:.2f})", color="red")
-plt.plot(tpr2, fpr2, label=f"{args.tag2} (AUC = {auc2:.2f})", color="blue")
-plt.scatter([sv_tpr1], [sv_fpr1], color="darkred", label=f"{args.tag1} IVF TPR={sv_tpr1:.2f}, FPR={sv_fpr1:.2f}", zorder=5)
-plt.scatter([sv_tpr2], [sv_fpr2], color="darkblue", label=f"{args.tag2} IVF TPR={sv_tpr2:.2f}, FPR={sv_fpr2:.2f}", zorder=5)
+plt.plot(r1, p1, label=f"{args.tag1} (AUC = {auc1:.2f})", color="red")
+plt.plot(r2, p2, label=f"{args.tag2} (AUC = {auc2:.2f})", color="blue")
+plt.scatter([sv_r1], [sv_p1], color="darkred", label=f"{args.tag1} IVF Recall={sv_r1:.2f}, Precision={sv_p1:.2f}", zorder=5)
+plt.scatter([sv_r2], [sv_p2], color="darkblue", label=f"{args.tag2} IVF Recall={sv_r2:.2f}, Precision={sv_p2:.2f}", zorder=5)
 
-plt.xlabel("Signal Efficiency")
-plt.ylabel("Background Mistag")
-plt.title('ROC Curve')
-#plt.yscale("log")
+plt.xlabel("Recall(Signal Efficiency)")
+plt.ylabel("Precision")
+plt.title('PR Curve')
+plt.yscale("log")
 plt.legend()
 plt.grid()
-plt.savefig(f"ROC_{args.savetag}.png")
+plt.savefig(f"PR_{args.savetag}_log.png")
 plt.close()
 
 

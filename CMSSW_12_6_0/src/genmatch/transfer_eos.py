@@ -3,9 +3,10 @@ import time
 import subprocess
 
 # Configuration
-watch_directory = "/uscms/home/nvenkata/nobackup/BTV/CMSSW_12_6_0/src/analysis"  # Directory to monitor
-eos_directory = "/store/group/lpcljm/nvenkata/BTVH/evt_toprocfiles"   # EOS directory
-polling_interval = 300                        # Time in seconds between directory checks
+watch_directory = "/uscms/home/nvenkata/nobackup/BTV/CMSSW_12_6_0/src/genmatch"  # Directory to monitor
+#eos_directory = "/store/group/lpcljm/nvenkata/BTVH/ttbarlep_toproc_120files"   # EOS directory
+eos_directory = "/store/user/nvenkata/ttbar_lep_toproc"
+polling_interval = 360                        # Time in seconds between directory check
 
 def transfer_and_remove(file_path, eos_directory):
     """
