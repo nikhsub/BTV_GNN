@@ -62,6 +62,15 @@ trk_charge      = std.vector('double')()
 had_pt          = std.vector('double')()
 nhads           = std.vector('int')()
 
+
+missed_sig      = std.vector('int')()
+trk_1           = std.vector('int')()
+trk_2           = std.vector('int')()
+deltaR          = std.vector('double')()
+dca             = std.vector('double')()
+rel_ip2d        = std.vector('double')()
+rel_ip3d        = std.vector('double')()
+
 outtree.Branch("had_pt", had_pt)
 outtree.Branch("sig_flag", sig_flag)
 outtree.Branch("sig_flav", sig_flav)
@@ -84,21 +93,16 @@ outtree.Branch("trk_nValidPixel", trk_nValidPixel)
 outtree.Branch("trk_nValidStrip", trk_nValidStrip)
 outtree.Branch("trk_charge", trk_charge)
 
+outtree.Branch("missed_sig", missed_sig)
+outtree.Branch("trk_1", trk_1)
+outtree.Branch("trk_2", trk_2)
+outtree.Branch("deltaR", deltaR)
+outtree.Branch("dca", dca)
+outtree.Branch("rel_ip2d", rel_ip2d)
+outtree.Branch("rel_ip3d", rel_ip3d)
+
 #outtree.Branch("delr", delr)
 #outtree.Branch("ptrat", ptrat)
-
-def delta_phi(phi1, phi2):
-    """
-    Calculate the difference in phi between two angles.
-    """
-    dphi = phi2 - phi1
-    return (dphi + np.pi) % (2 * np.pi) - np.pi
-
-def delta_eta(eta1, eta2):
-    """
-    Calculate the difference in eta.
-    """
-    return eta2 - eta1
 
 def delta_R(eta1, phi1, eta2, phi2):
     """Efficiently compute ΔR using vectorized operations."""
@@ -113,8 +117,8 @@ for i, evt in enumerate(tree):
     if i >= end_index:
         break
 
-    if(i%1000 ==0): 
-        print("EVT", i) 
+    #if(i%1000 ==0): 
+    print("EVT", i) 
     
     nhads.clear()
     had_pt.clear()
@@ -140,14 +144,15 @@ for i, evt in enumerate(tree):
     trk_nValid.clear();
     trk_nValidPixel.clear();
     trk_nValidStrip.clear();
-    
-    #low_pt = False
-    #for had in range(evt.nHadrons[0]):
-    #    print(evt.Hadron_pt[had])
-    #    if(evt.Hadron_pt[had] < 50):
-    #        low_pt = True
-    #if(not low_pt): continue
-    
+
+    missed_sig.clear();
+    trk_1.clear();
+    trk_2.clear();
+    deltaR.clear();
+    dca.clear();
+    rel_ip2d.clear();
+    rel_ip3d.clear();
+ 
     if(args.lowpt):
         high_pt = np.any(np.array(evt.Hadron_pt) > 20)
         if(high_pt): continue
@@ -158,6 +163,13 @@ for i, evt in enumerate(tree):
         had_pt.push_back(evt.Hadron_pt[had])
 
     nhads.push_back(hads)
+    
+    trk_1.assign(evt.trk_i.begin(), evt.trk_i.end());
+    trk_2.assign(evt.trk_j.begin(), evt.trk_j.end());
+    deltaR.assign(evt.deltaR.begin(), evt.deltaR.end());
+    dca.assign(evt.dca.begin(), evt.dca.end())
+    rel_ip2d.assign(evt.rel_ip2d.begin(), evt.rel_ip2d.end())
+    rel_ip3d.assign(evt.rel_ip3d.begin(), evt.rel_ip3d.end())
 
     for trk in range(evt.nTrks[0]):
         trk_ip2d.push_back(evt.trk_ip2d[trk])
@@ -174,7 +186,10 @@ for i, evt in enumerate(tree):
         trk_charge.push_back(evt.trk_charge[trk])
 
     nds = sum(evt.nDaughters)
-
+    seltrk_ind =  np.array(evt.trk_i)
+    
+    miss_sig = 0
+    
     #MATCHING SV TRKS TO TRKS
     if(sum(evt.SV_ntrks) > 0):
         alltrk_data = np.array([(evt.trk_pt[i], evt.trk_eta[i], evt.trk_phi[i]) for i in range(evt.nTrks[0])])
@@ -201,50 +216,53 @@ for i, evt in enumerate(tree):
         
         delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
 
+
         for d in range(nds):
             trk_mindr = 1e6
-            trk_flag = -1
-            trk_flav = -1
             trk_ptrat = -1
             tind = -1
             bkgcount = 0
             rand_bkgcount = 0
+            d_flag  = evt.Daughters_flag[d]
+            d_flav  = evt.Daughters_flav[d]
+            d_pt    = evt.Daughters_pt[d]
+            d_charge= evt.Daughters_charge[d]
             for trk in range(evt.nTrks[0]):
                 if(d==0):
                     if(evt.trk_pt[trk] > 0.8 and abs(evt.trk_ip3d[trk]) > 0.005 and abs(evt.trk_ip2dsig[trk]) > 1.2):
                         seed_ind.push_back(trk)
 
                 #if(trk in tinds): continue
-                if(evt.trk_charge[trk] != evt.Daughters_charge[d]): continue
+                if(evt.trk_charge[trk] != d_charge): continue
                 if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
                 delR = delta_R_matrix[trk, d]
-                temp_ptrat = (evt.trk_pt[trk])/(evt.Daughters_pt[d])
-                if (delR <= trk_mindr and delR< 0.02 and temp_ptrat >= 0.8 and temp_ptrat <= 1.2):
+                temp_ptrat = (evt.trk_pt[trk])/(d_pt)
+                if (delR <= trk_mindr and delR< 0.02 and temp_ptrat >= 0.8 and temp_ptrat <= 1.2):  
                     trk_mindr = delR
                     trk_ptrat = temp_ptrat
                     tind = trk
 
                 elif (bkgcount <= 15 and delR < 0.02 and ((temp_ptrat >=0.6 and temp_ptrat <0.8) or (temp_ptrat > 1.2 and temp_ptrat <=1.4))):
                     bkg_ind.push_back(trk)
-                    bkg_flag.push_back(evt.Daughters_flag[d])
+                    bkg_flag.push_back(d_flag)
                     bkgcount+=1;
                 
                 elif(rand_bkgcount <= 5 and delR > 0.04):
                     bkg_ind.push_back(trk)
-                    bkg_flag.push_back(evt.Daughters_flag[d])
+                    bkg_flag.push_back(d_flag)
                     rand_bkgcount+=1; 
 
-            
+             
             if(trk_ptrat > 0):
-                trk_flag = evt.Daughters_flag[d] #Which hadron it comes from
-                trk_flav = evt.Daughters_flav[d]
+                if(tind not in seltrk_ind): miss_sig+=1
                 sig_ind.push_back(tind)
-                sig_flag.push_back(trk_flag)
-                sig_flav.push_back(trk_flav)
+                sig_flag.push_back(d_flag)
+                sig_flav.push_back(d_flav)
                 #delr.push_back(trk_mindr)
                 #ptrat.push_back(trk_ptrat)
                 #tinds.append(tind)
 
+    missed_sig.push_back(miss_sig)
     outtree.Fill()
 
 

@@ -9,24 +9,26 @@ class GNNModel(torch.nn.Module):
 
         self.bn0 = nn.BatchNorm1d(indim)
 
-        self.proj_skip = nn.Linear(indim, outdim * 2)
+        self.proj_skip = nn.Linear(indim, outdim)
 
         self.gcn1 = GCNConv(indim, outdim)
         self.gat1 = GATConv(outdim, outdim*2, heads=heads, concat=False)
 
-        self.gcn2 = GCNConv(outdim*2, outdim)
-        self.gat2 = GATConv(outdim, outdim, heads=heads, concat=False)
+        self.gcn2 = GCNConv(outdim*2, outdim*2)
+        self.gat2 = GATConv(outdim, outdim*2, heads=heads, concat=False, negative_slope=0.2)
 
 
-        self.bn1 = nn.BatchNorm1d(outdim*2)
-        self.bn2 = nn.BatchNorm1d(outdim)
+        self.bn1 = nn.BatchNorm1d(outdim*1)
+        self.bn2 = nn.BatchNorm1d(outdim*2)
         self.drop1 = nn.Dropout(p=dropout)
         self.drop2 = nn.Dropout(p=dropout)
 
-        self.skip_weight = nn.Parameter(torch.tensor(0.2))
+        self.skip_weight = nn.Parameter(torch.tensor(0.8))
+        self.alpha = nn.Parameter(torch.tensor(0.5))  # Learnable mix parameter
+        self.proj_x1 = nn.Linear(outdim, outdim*2)
 
         #catout = outdim + outdim*2
-        catout = outdim*3
+        catout = outdim*2
 
         self.node_pred = nn.Sequential(
             nn.Linear(catout, catout//2),
@@ -35,10 +37,10 @@ class GNNModel(torch.nn.Module):
             nn.Linear(catout//2, catout//4),
             nn.Softplus(),
             nn.Dropout(0.2),
-            nn.Linear(catout//4, catout//8),
-            nn.LeakyReLU(),
-            nn.Dropout(0.25),
-            nn.Linear(catout//8, 1)
+            #nn.Linear(catout//4, catout//8),
+            #nn.LeakyReLU(),
+            #nn.Dropout(0.25),
+            nn.Linear(catout//4, 1)
             #nn.Sigmoid()
         )
 
@@ -48,7 +50,7 @@ class GNNModel(torch.nn.Module):
         x = self.bn0(x_in)
 
         x1 = self.gcn1(x, edge_index)
-        x1 = self.gat1(x1, edge_index)
+        #x1 = self.gat1(x1, edge_index)
         x1 = self.bn1(x1)
         x1 = F.leaky_relu(x1)
         x1 = self.drop1(x1)
@@ -56,13 +58,16 @@ class GNNModel(torch.nn.Module):
         x_proj = self.proj_skip(x)
         skip1 = self.skip_weight * x_proj + x1
 
-        x2 = self.gcn2(skip1, edge_index)
-        x2 = self.gat2(x2, edge_index)
+        #x2 = self.gcn2(skip1, edge_index)
+        x2 = self.gat2(skip1, edge_index)
         x2 = self.bn2(x2)
         x2 = F.leaky_relu(x2)
         x2 = self.drop2(x2)
+        x1_proj = self.proj_x1(x1)
+        
+        xf = self.alpha * x1_proj + (1 - self.alpha) * x2
 
-        xf = torch.cat([x2, x1], dim=1)
+        #xf = torch.cat([x2, x1], dim=1)
 
         node_probs = self.node_pred(xf)
 

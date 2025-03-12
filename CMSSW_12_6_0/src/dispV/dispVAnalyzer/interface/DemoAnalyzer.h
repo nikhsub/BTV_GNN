@@ -30,6 +30,7 @@
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
 #include "DataFormats/JetReco/interface/GenJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
+#include "DataFormats/Math/interface/deltaR.h"
 
 //TFile Service
 
@@ -45,6 +46,9 @@
 #include "TrackingTools/TransientTrack/interface/TransientTrackBuilder.h"
 #include "TrackingTools/Records/interface/TransientTrackRecord.h"
 #include "MagneticField/Engine/interface/MagneticField.h"
+#include "TrackingTools/TrajectoryState/interface/TrajectoryStateClosestToPoint.h"
+#include "TrackingTools/TransientTrack/interface/TransientTrack.h"
+#include "TrackingTools/PatternTools/interface/TwoTrackMinimumDistance.h"
 
 //Pileup info
 #include "SimDataFormats/PileupSummaryInfo/interface/PileupSummaryInfo.h"
@@ -122,6 +126,13 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<int> trk_nValid;
       std::vector<int> trk_nValidPixel;
       std::vector<int> trk_nValidStrip;
+	
+      std::vector<int> trk_i;
+      std::vector<int> trk_j;
+      std::vector<float> deltaR;
+      std::vector<float> dca;
+      std::vector<float> rel_ip2d;
+      std::vector<float> rel_ip3d;
       
       std::vector<int> njets;
       std::vector<float> jet_pt;

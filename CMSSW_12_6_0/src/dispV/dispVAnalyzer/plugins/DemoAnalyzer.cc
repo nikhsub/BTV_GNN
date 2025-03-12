@@ -21,6 +21,7 @@
 
 #include "dispV/dispVAnalyzer/interface/DemoAnalyzer.h"
 #include <iostream>
+#include <omp.h>
 
 DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig):
 
@@ -170,6 +171,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   //jet_pt.clear();
   //jet_eta.clear();
   //jet_phi.clear();
+  trk_i.clear();
+  trk_j.clear();
+  deltaR.clear();
+  dca.clear();
+  rel_ip2d.clear();
+  rel_ip3d.clear();
 
   nSVs.clear();
   SV_x.clear();
@@ -256,26 +263,79 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    //njets.push_back(njet);
    
    int ntrk = 0;
-   for (const auto& track : alltracks) {
-	reco::TransientTrack t_trk = (*theB).build(track);
-	if (!(t_trk.isValid())) continue;
-	Measurement1D ip2d = IPTools::signedTransverseImpactParameter(t_trk, direction, pv).second;
-	Measurement1D ip3d = IPTools::signedImpactParameter3D(t_trk, direction, pv).second;	
+   size_t num_tracks = alltracks.size();
+   std::vector<reco::TransientTrack> t_trks(num_tracks);
+   std::vector<Measurement1D> ip2d_vals(num_tracks);
+   std::vector<Measurement1D> ip3d_vals(num_tracks);
 
-   	trk_ip2d.push_back(ip2d.value());
-	trk_ip3d.push_back(ip3d.value());
-	trk_ip2dsig.push_back(ip2d.significance());
-	trk_ip3dsig.push_back(ip3d.significance());
-	trk_p.push_back(track.p());
-	trk_pt.push_back(track.pt());
-	trk_eta.push_back(track.eta());
-	trk_phi.push_back(track.phi());
-	trk_charge.push_back(track.charge());
-	trk_nValid.push_back(track.numberOfValidHits());
-	trk_nValidPixel.push_back(track.hitPattern().numberOfValidPixelHits());
-	trk_nValidStrip.push_back(track.hitPattern().numberOfValidStripHits());
+   for (size_t i = 0; i< num_tracks; ++i) {
+	t_trks[i] = (*theB).build(alltracks[i]);
+	if (!(t_trks[i].isValid())) continue;
+	ip2d_vals[i] = IPTools::signedTransverseImpactParameter(t_trks[i], direction, pv).second;
+	ip3d_vals[i] = IPTools::signedImpactParameter3D(t_trks[i], direction, pv).second;	
+
+   	trk_ip2d.push_back(ip2d_vals[i].value());
+	trk_ip3d.push_back(ip3d_vals[i].value());
+	trk_ip2dsig.push_back(ip2d_vals[i].significance());
+	trk_ip3dsig.push_back(ip3d_vals[i].significance());
+	trk_p.push_back(alltracks[i].p());
+	trk_pt.push_back(alltracks[i].pt());
+	trk_eta.push_back(alltracks[i].eta());
+	trk_phi.push_back(alltracks[i].phi());
+	trk_charge.push_back(alltracks[i].charge());
+	trk_nValid.push_back(alltracks[i].numberOfValidHits());
+	trk_nValidPixel.push_back(alltracks[i].hitPattern().numberOfValidPixelHits());
+	trk_nValidStrip.push_back(alltracks[i].hitPattern().numberOfValidStripHits());
 	ntrk++;
-   }
+    }
+    
+    size_t estimated_pairs = num_tracks * num_tracks / 2;  // Approximate number of pairs
+    trk_i.reserve(estimated_pairs);
+    trk_j.reserve(estimated_pairs);
+    deltaR.reserve(estimated_pairs);
+    dca.reserve(estimated_pairs);
+    rel_ip2d.reserve(estimated_pairs);
+    rel_ip3d.reserve(estimated_pairs);
+	
+   // Parallelize the outer loop
+    #pragma omp parallel for
+    for (size_t i = 0; i < num_tracks; ++i) {
+        if (!t_trks[i].isValid()) continue;
+    
+        for (size_t j = i + 1; j < num_tracks; ++j) {
+            if (!t_trks[j].isValid()) continue;
+    
+            float eta1 = alltracks[i].eta();
+            float phi1 = alltracks[i].phi();
+            float eta2 = alltracks[j].eta();
+            float phi2 = alltracks[j].phi();
+            float delta_r_val = reco::deltaR(eta1, phi1, eta2, phi2);
+    
+            if (delta_r_val > 0.4) continue;
+    
+            float dca_val = -1.0;  // Default invalid value
+            TwoTrackMinimumDistance minDist;
+            if (minDist.calculate(t_trks[i].initialFreeState(), t_trks[j].initialFreeState())) {
+                dca_val = minDist.distance();
+            }
+    
+            if (dca_val > 0.2) continue;
+    
+            float rel_ip2d_val = fabs(ip2d_vals[i].value() - ip2d_vals[j].value());
+            float rel_ip3d_val = fabs(ip3d_vals[i].value() - ip3d_vals[j].value());
+    
+            #pragma omp critical
+            {
+                trk_i.push_back(i);
+                trk_j.push_back(j);
+                deltaR.push_back(delta_r_val);
+                dca.push_back(dca_val);
+                rel_ip2d.push_back(rel_ip2d_val);
+                rel_ip3d.push_back(rel_ip3d_val);
+            }
+        }
+    }
+
    ntrks.push_back(ntrk);
 
    int nhads = 0;
@@ -448,6 +508,13 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("trk_nValidPixel", &trk_nValidPixel);
 	tree->Branch("trk_nValidStrip", &trk_nValidStrip);
 	tree->Branch("trk_charge", &trk_charge);
+         
+        tree->Branch("trk_i", &trk_i);
+	tree->Branch("trk_j", &trk_j);
+	tree->Branch("deltaR", &deltaR);
+	tree->Branch("dca", &dca);
+	tree->Branch("rel_ip2d", &rel_ip2d);
+	tree->Branch("rel_ip3d", &rel_ip3d);
 
 	//tree->Branch("nJets", &njets);
 	//tree->Branch("jet_pt", &jet_pt);

@@ -19,6 +19,8 @@
 <use name="TrackingTools/TransientTrack"/>
 <use name="TrackingTools/Records"/>
 <use name="TrackingTools/IPTools"/>
+<use name="TrackingTools/TrajectoryState"/>
+<use name="TrackingTools/PatternTools"/>
 <use name="RecoVertex/ConfigurableVertexReco"/>
 <use name="RecoVertex/AdaptiveVertexFinder"/>
 <use name="SimDataFormats/PileupSummaryInfo"/>
@@ -30,4 +32,4 @@
 <use name="lhapdf"/>
 <use name="PhysicsTools/PatUtils"/>
 <flags EDM_PLUGIN="1"/>
-
+<flags CXXFLAGS="-fopenmp"/>

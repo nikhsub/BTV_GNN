@@ -6,6 +6,7 @@
 *.csv
 *.pth
 *.pkl
+*.txt
 CMSSW_12_6_0/biglib
 CMSSW_12_6_0/cfipython
 CMSSW_12_6_0/doc
