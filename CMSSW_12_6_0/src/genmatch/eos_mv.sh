@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Source and destination directories (Modify these)
-SOURCE_DIR="/store/group/lpcljm/nvenkata/BTVH/ttbarlep_toproc_120files"
-DEST_DIR="/store/user/nvenkata/ttbar_lep_toproc"
+SOURCE_DIR="/store/group/lpcljm/nvenkata/BTV/to_proc"
+DEST_DIR="/store/user/nvenkata/BTV/toproc"
 
 # EOS prefix
 EOS_PREFIX="root://cmseos.fnal.gov"

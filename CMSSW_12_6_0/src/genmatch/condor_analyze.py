@@ -35,7 +35,7 @@ def create_condor_submit_file(folder, key, pyscript, bashjob, filename, current,
         fcondor.write(f"Output = {folder}/run_{key}.out\n")
         fcondor.write(f"Error  = {folder}/run_{key}.err\n")
         fcondor.write(f"Log    = {folder}/run_{key}.log\n")
-        fcondor.write("request_memory = 8000\n")
+        fcondor.write("request_memory = 4000\n")
         fcondor.write("request_cpus = 4\n")
 
         output = f"output_{key}"

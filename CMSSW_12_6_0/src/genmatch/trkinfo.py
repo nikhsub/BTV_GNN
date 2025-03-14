@@ -5,6 +5,7 @@ import argparse
 #import array
 import math
 import numpy as np
+import random
 
 parser = argparse.ArgumentParser("Create track information root file")
 
@@ -34,7 +35,6 @@ Outfile = TFile(args.out+".root", "recreate")
 outtree = TTree("tree", "tree")
 
 sig_ind       = std.vector('int')()
-seed_ind      = std.vector('int')()
 sig_flag      = std.vector('int')()
 sig_flav      = std.vector('int')()
 
@@ -71,35 +71,18 @@ dca             = std.vector('double')()
 rel_ip2d        = std.vector('double')()
 rel_ip3d        = std.vector('double')()
 
-outtree.Branch("had_pt", had_pt)
-outtree.Branch("sig_flag", sig_flag)
-outtree.Branch("sig_flav", sig_flav)
-outtree.Branch("sig_ind", sig_ind)
-outtree.Branch("bkg_ind", bkg_ind)
-outtree.Branch("bkg_flag", bkg_flag)
-outtree.Branch("seed_ind", seed_ind)
-outtree.Branch("SVtrk_ind", SVtrk_ind)
+branches = {
+    "had_pt": had_pt, "sig_flag": sig_flag, "sig_flav": sig_flav, "sig_ind": sig_ind, "bkg_ind": bkg_ind,
+    "bkg_flag": bkg_flag, "SVtrk_ind": SVtrk_ind, "trk_ip2d": trk_ip2d,
+    "trk_ip3d": trk_ip3d, "trk_ip2dsig": trk_ip2dsig, "trk_ip3dsig": trk_ip3dsig, "trk_p": trk_p,
+    "trk_pt": trk_pt, "trk_eta": trk_eta, "trk_phi": trk_phi, "trk_nValid": trk_nValid,
+    "trk_nValidPixel": trk_nValidPixel, "trk_nValidStrip": trk_nValidStrip, "trk_charge": trk_charge,
+    "missed_sig": missed_sig, "trk_1": trk_1, "trk_2": trk_2, "deltaR": deltaR,
+    "dca": dca, "rel_ip2d": rel_ip2d, "rel_ip3d": rel_ip3d
+}
 
-outtree.Branch("trk_ip2d", trk_ip2d)
-outtree.Branch("trk_ip3d", trk_ip3d)
-outtree.Branch("trk_ip2dsig", trk_ip2dsig)
-outtree.Branch("trk_ip3dsig", trk_ip3dsig)
-outtree.Branch("trk_p", trk_p)
-outtree.Branch("trk_pt", trk_pt)
-outtree.Branch("trk_eta", trk_eta)
-outtree.Branch("trk_phi", trk_phi)
-outtree.Branch("trk_nValid", trk_nValid)
-outtree.Branch("trk_nValidPixel", trk_nValidPixel)
-outtree.Branch("trk_nValidStrip", trk_nValidStrip)
-outtree.Branch("trk_charge", trk_charge)
-
-outtree.Branch("missed_sig", missed_sig)
-outtree.Branch("trk_1", trk_1)
-outtree.Branch("trk_2", trk_2)
-outtree.Branch("deltaR", deltaR)
-outtree.Branch("dca", dca)
-outtree.Branch("rel_ip2d", rel_ip2d)
-outtree.Branch("rel_ip3d", rel_ip3d)
+for name, branch in branches.items():
+    outtree.Branch(name, branch)
 
 #outtree.Branch("delr", delr)
 #outtree.Branch("ptrat", ptrat)
@@ -117,82 +100,45 @@ for i, evt in enumerate(tree):
     if i >= end_index:
         break
 
-    #if(i%1000 ==0): 
-    print("EVT", i) 
+    if(i%10 ==0): 
+        print("EVT", i) 
     
-    nhads.clear()
-    had_pt.clear()
-    sig_ind.clear()
-    bkg_ind.clear()
-    seed_ind.clear()
-    sig_flag.clear()
-    bkg_flag.clear()
-    sig_flav.clear()
-    SVtrk_ind.clear()
-    #delr.clear()
-    #ptrat.clear()
-
-    trk_ip2d.clear();
-    trk_ip3d.clear();
-    trk_ip2dsig.clear();
-    trk_ip3dsig.clear();
-    trk_p.clear();
-    trk_pt.clear();
-    trk_eta.clear();
-    trk_phi.clear();
-    trk_charge.clear();
-    trk_nValid.clear();
-    trk_nValidPixel.clear();
-    trk_nValidStrip.clear();
-
-    missed_sig.clear();
-    trk_1.clear();
-    trk_2.clear();
-    deltaR.clear();
-    dca.clear();
-    rel_ip2d.clear();
-    rel_ip3d.clear();
- 
+    for branch in branches.values():
+        branch.clear()
+    
     if(args.lowpt):
         high_pt = np.any(np.array(evt.Hadron_pt) > 20)
         if(high_pt): continue
     
-    hads = 0
-    for had in range(evt.nHadrons[0]):
-        hads+=1
-        had_pt.push_back(evt.Hadron_pt[had])
+    nHads = evt.nHadrons[0]
+    had_pt.reserve(nHads)
+    had_pt.assign(evt.Hadron_pt.begin(), evt.Hadron_pt.end());
 
-    nhads.push_back(hads)
-    
-    trk_1.assign(evt.trk_i.begin(), evt.trk_i.end());
-    trk_2.assign(evt.trk_j.begin(), evt.trk_j.end());
-    deltaR.assign(evt.deltaR.begin(), evt.deltaR.end());
-    dca.assign(evt.dca.begin(), evt.dca.end())
-    rel_ip2d.assign(evt.rel_ip2d.begin(), evt.rel_ip2d.end())
-    rel_ip3d.assign(evt.rel_ip3d.begin(), evt.rel_ip3d.end())
+    trk_1.assign(list(evt.trk_i))
+    trk_2.assign(list(evt.trk_j))
+    deltaR.assign(list(evt.deltaR))
+    dca.assign(list(evt.dca))
+    rel_ip2d.assign(list(evt.rel_ip2d))
+    rel_ip3d.assign(list(evt.rel_ip3d))
 
-    for trk in range(evt.nTrks[0]):
-        trk_ip2d.push_back(evt.trk_ip2d[trk])
-        trk_ip3d.push_back(evt.trk_ip3d[trk])
-        trk_ip2dsig.push_back(evt.trk_ip2dsig[trk])
-        trk_ip3dsig.push_back(evt.trk_ip3dsig[trk])
-        trk_p.push_back(evt.trk_p[trk])
-        trk_pt.push_back(evt.trk_pt[trk])
-        trk_eta.push_back(evt.trk_eta[trk])
-        trk_phi.push_back(evt.trk_phi[trk])
-        trk_nValid.push_back(evt.trk_nValid[trk])
-        trk_nValidPixel.push_back(evt.trk_nValidPixel[trk])
-        trk_nValidStrip.push_back(evt.trk_nValidStrip[trk])
-        trk_charge.push_back(evt.trk_charge[trk])
+    trk_ip2d.assign(list(evt.trk_ip2d))
+    trk_ip3d.assign(list(evt.trk_ip3d))
+    trk_ip2dsig.assign(list(evt.trk_ip2dsig))
+    trk_ip3dsig.assign(list(evt.trk_ip3dsig))
+    trk_p.assign(list(evt.trk_p))
+    trk_pt.assign(list(evt.trk_pt))
+    trk_eta.assign(list(evt.trk_eta))
+    trk_phi.assign(list(evt.trk_phi))
+    trk_nValid.assign(list(evt.trk_nValid))
+    trk_nValidPixel.assign(list(evt.trk_nValidPixel))
+    trk_nValidStrip.assign(list(evt.trk_nValidStrip))
+    trk_charge.assign(list(evt.trk_charge))
+    
+    nTrks = evt.nTrks[0]
 
-    nds = sum(evt.nDaughters)
-    seltrk_ind =  np.array(evt.trk_i)
-    
-    miss_sig = 0
-    
     #MATCHING SV TRKS TO TRKS
     if(sum(evt.SV_ntrks) > 0):
-        alltrk_data = np.array([(evt.trk_pt[i], evt.trk_eta[i], evt.trk_phi[i]) for i in range(evt.nTrks[0])])
+        alltrk_data = np.array([(evt.trk_pt[i], evt.trk_eta[i], evt.trk_phi[i]) for i in range(nTrks)])
         svtrk_data = np.array([(evt.SVtrk_pt[i], evt.SVtrk_eta[i], evt.SVtrk_phi[i]) for i in range(sum(evt.SV_ntrks))])
         
         pt_diff = np.abs(alltrk_data[:, 0][:, None] - svtrk_data[:, 0])
@@ -205,64 +151,45 @@ for i, evt in enumerate(tree):
         for ind in svtrkinds:
             SVtrk_ind.push_back(int(ind))
 
-    #tinds = []
-     
+    seltrk_ind =  np.array(evt.trk_i) 
+    trk_pt_array = np.array(evt.trk_pt)
+    d_pt_array = np.array(evt.Daughters_pt)
+    d_flag_array = np.array(evt.Daughters_flag)
+    d_flav_array = np.array(evt.Daughters_flav)
+    trk_eta_array = np.array(evt.trk_eta)  # Direct slicing
+    trk_phi_array = np.array(evt.trk_phi)
+    d_eta_array = np.array(evt.Daughters_eta)
+    d_phi_array = np.array(evt.Daughters_phi)
+    delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
+    valid_tracks = (trk_pt_array >= 0.5) & (np.abs(trk_eta_array) < 2.5)
+    
+    bkg_mask1 = valid_tracks[:, None] & (delta_R_matrix < 0.02) & (0.6 <= (trk_pt_array[:, None] / d_pt_array)) & ((trk_pt_array[:, None] / d_pt_array) < 0.8)
+    bkg_mask2 = valid_tracks[:, None] & (0.02 < delta_R_matrix) & (delta_R_matrix < 0.1)
+    bkg_mask3 = valid_tracks[:, None] & (0.1 < delta_R_matrix) & (delta_R_matrix < 0.2)
+    
+    
+    min_deltaR_indices = np.argmin(delta_R_matrix, axis=0)
+    sig_mask = valid_tracks[min_deltaR_indices] & \
+               (delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])] < 0.02) & \
+               (0.8 <= (trk_pt_array[min_deltaR_indices] / d_pt_array)) & \
+               ((trk_pt_array[min_deltaR_indices] / d_pt_array) <= 1.2)
+    sig_indices = min_deltaR_indices[sig_mask]
+    miss_sig_count = np.sum(~np.isin(sig_indices, seltrk_ind))
+    missed_sig.assign([int(miss_sig_count)])
+    sig_ind.assign(sig_indices.tolist())
+    sig_daughters = np.where(sig_mask)[0]  # Get indices of selected daughters
+    sig_flag.assign(d_flag_array[sig_daughters].tolist())  
+    sig_flav.assign(d_flav_array[sig_daughters].tolist())
 
-    if(nds>0):
-        trk_eta_array = np.array(evt.trk_eta[:evt.nTrks[0]])  # Direct slicing
-        trk_phi_array = np.array(evt.trk_phi[:evt.nTrks[0]])
-        d_eta_array = np.array(evt.Daughters_eta[:nds])
-        d_phi_array = np.array(evt.Daughters_phi[:nds])
-        
-        delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
-
-
-        for d in range(nds):
-            trk_mindr = 1e6
-            trk_ptrat = -1
-            tind = -1
-            bkgcount = 0
-            rand_bkgcount = 0
-            d_flag  = evt.Daughters_flag[d]
-            d_flav  = evt.Daughters_flav[d]
-            d_pt    = evt.Daughters_pt[d]
-            d_charge= evt.Daughters_charge[d]
-            for trk in range(evt.nTrks[0]):
-                if(d==0):
-                    if(evt.trk_pt[trk] > 0.8 and abs(evt.trk_ip3d[trk]) > 0.005 and abs(evt.trk_ip2dsig[trk]) > 1.2):
-                        seed_ind.push_back(trk)
-
-                #if(trk in tinds): continue
-                if(evt.trk_charge[trk] != d_charge): continue
-                if(not (evt.trk_pt[trk] >= 0.5 and abs(evt.trk_eta[trk]) < 2.5)): continue
-                delR = delta_R_matrix[trk, d]
-                temp_ptrat = (evt.trk_pt[trk])/(d_pt)
-                if (delR <= trk_mindr and delR< 0.02 and temp_ptrat >= 0.8 and temp_ptrat <= 1.2):  
-                    trk_mindr = delR
-                    trk_ptrat = temp_ptrat
-                    tind = trk
-
-                elif (bkgcount <= 15 and delR < 0.02 and ((temp_ptrat >=0.6 and temp_ptrat <0.8) or (temp_ptrat > 1.2 and temp_ptrat <=1.4))):
-                    bkg_ind.push_back(trk)
-                    bkg_flag.push_back(d_flag)
-                    bkgcount+=1;
-                
-                elif(rand_bkgcount <= 5 and delR > 0.04):
-                    bkg_ind.push_back(trk)
-                    bkg_flag.push_back(d_flag)
-                    rand_bkgcount+=1; 
-
-             
-            if(trk_ptrat > 0):
-                if(tind not in seltrk_ind): miss_sig+=1
-                sig_ind.push_back(tind)
-                sig_flag.push_back(d_flag)
-                sig_flav.push_back(d_flav)
-                #delr.push_back(trk_mindr)
-                #ptrat.push_back(trk_ptrat)
-                #tinds.append(tind)
-
-    missed_sig.push_back(miss_sig)
+    
+    bkg_indices, bkg_daughters = np.where(bkg_mask1 | bkg_mask2 | bkg_mask3)
+    if len(bkg_indices) > 20:
+        sampled_indices = np.random.choice(len(bkg_indices), size=20, replace=False)
+        bkg_indices = bkg_indices[sampled_indices]
+        bkg_daughters = bkg_daughters[sampled_indices]
+    bkg_flag.assign(d_flag_array[bkg_daughters].tolist())
+    bkg_ind.assign(bkg_indices.tolist())
+    
     outtree.Fill()
 
 

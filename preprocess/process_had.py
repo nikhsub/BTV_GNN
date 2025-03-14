@@ -36,52 +36,40 @@ bkg_ind_array = datatree['bkg_ind'].array()
 seed_array = datatree['seed_ind'].array()
 SV_ind_array = datatree['SVtrk_ind'].array()
 had_pt_array = datatree['had_pt'].array()
+trk_1_array  = datatree['trk_1'].array()
+trk_2_array  = datatree['trk_2'].array()
+deltaR_array  = datatree['deltaR'].array()
+dca_array  = datatree['dca'].array()
+rel_ip2d_array  = datatree['rel_ip2d'].array()
+rel_ip3d_array  = datatree['rel_ip3d'].array()
 
-def create_edge_index(sig_inds, bkg_inds):
-    edge_list = []
+def create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_inds):
+    """
+    Create edge index and edge features for tracks in val_comb_inds.
+    """
+    
+    #Filter
+    valid_edge_mask = np.isin(trk_i, val_comb_inds) & np.isin(trk_j, val_comb_inds)
 
-    ## === 1. Fully Connect Signal Tracks === ##
-    sig_pairs = np.array(list(combinations(sig_inds, 2)), dtype=np.int64)
-    if len(sig_pairs) > 0:
-        edge_list.append(sig_pairs)
-        edge_list.append(sig_pairs[:, [1, 0]])  # Ensure bidirectionality
-
-    ## === 2. Signal-Background Edges (Retain a Fraction) === ##
-    if len(sig_inds) > 0 and len(bkg_inds) > 0:
-        sig_bkg_combos = np.array(np.meshgrid(sig_inds, bkg_inds)).T.reshape(-1, 2)
-        num_sig_bkg_edges = len(sig_pairs)
-        if num_sig_bkg_edges > 0:
-            selected_sig_bkg_edges = sig_bkg_combos[np.random.choice(len(sig_bkg_combos), num_sig_bkg_edges, replace=False)]
-            edge_list.append(selected_sig_bkg_edges)
-            edge_list.append(selected_sig_bkg_edges[:, [1, 0]])  # Bidirectional
-
-    ## === 3. Background-Background Edges (Retain a Fraction) === ##
-    if len(bkg_inds) > 1:
-        bkg_combos = np.array(list(combinations(bkg_inds, 2)), dtype=np.int64)
-        num_bkg_edges = len(sig_pairs)
-        if num_bkg_edges > 0 and len(bkg_combos)> 0:
-            connected_bkg_nodes = set(selected_sig_bkg_edges[:, 1]) if num_sig_bkg_edges > 0 else set()
-            valid_bkg_edges = []
-            while len(valid_bkg_edges) < num_bkg_edges and len(bkg_combos) > 0:
-                edge_candidates = bkg_combos[np.random.choice(len(bkg_combos), min(5, len(bkg_combos)), replace=False)]
-                for edge in edge_candidates:
-                    if edge[0] in connected_bkg_nodes or edge[1] in connected_bkg_nodes:
-                        valid_bkg_edges.append(edge)
-                        connected_bkg_nodes.update(edge)  # Add new connected nodes
-                        if len(valid_bkg_edges) >= num_bkg_edges:
-                            break
-            if len(valid_bkg_edges) > 0:
-                valid_bkg_edges = np.array(valid_bkg_edges)
-                edge_list.append(valid_bkg_edges)
-                edge_list.append(valid_bkg_edges[:, [1, 0]])  # Bidirectional
-
-    ## === 4. Concatenate All Edges and Convert to PyTorch Tensor === ##
-    edge_index = np.vstack(edge_list) if len(edge_list) > 0 else np.zeros((0, 2), dtype=np.int64)
-    return torch.tensor(edge_index.T, dtype=torch.int64)
+    trk_i_np = trk_i.to_numpy()
+    trk_j_np = trk_j.to_numpy()
+    dca_np = dca.to_numpy()
+    deltaR_np = deltaR.to_numpy()
+    rel_ip2d_np = rel_ip2d.to_numpy()
+    rel_ip3d_np = rel_ip3d.to_numpy()
+    
+    
+    # Extract valid edges and their features
+    edge_index = np.vstack([trk_i_np[valid_edge_mask], trk_j_np[valid_edge_mask]]).astype(np.int64)
+    edge_features = np.vstack([dca_np[valid_edge_mask], deltaR_np[valid_edge_mask], 
+                              rel_ip2d_np[valid_edge_mask], rel_ip3d_np[valid_edge_mask]]).T
+    
+    return edge_index, edge_features
 
 
 def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
-                   seed_array, SV_ind_array, had_pt_array, trk_features, nevts=3):
+                   seed_array, SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+                   dca_array, rel_ip2d_array, rel_ip3d_array, trk_features, nevts=3):
 
     had_objects = []
 
@@ -101,39 +89,46 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             comb_inds = list(sig_inds) + bkg_inds
             feature_matrix = np.vstack([np.array([evt_features[f][int(ind)] for ind in comb_inds]) for f in trk_features]).T
 
-            hadron_pt = had_pt_array[evt][had]
+            #hadron_pt = had_pt_array[evt][had]
 
             had_nan_mask = ~np.isnan(feature_matrix).any(axis=1)
             feature_matrix = feature_matrix[had_nan_mask]
             val_comb_inds = np.array(comb_inds)[had_nan_mask]
 
-            sig_inds = [i for i, ind in enumerate(val_comb_inds) if ind in sig_inds]
-
+            val_comb_inds_map = {ind: i for i, ind in enumerate(val_comb_inds)}
+            
+            sig_inds = [val_comb_inds_map[ind] for ind in sig_inds if ind in val_comb_inds_map]
             if(len(sig_inds) < 3): continue
 
-            bkg_inds = [i for i, ind in enumerate(val_comb_inds) if ind in bkg_inds]
-            labels = np.zeros(len(sig_inds) + len(bkg_inds))
-            labels[:len(sig_inds)] = 1
-
-            #print("Signal before shuffling", sig_inds)
-            #print("Bkg before shuffling", bkg_inds)
-            #print("Labels before shuffling", labels)
+            bkg_inds = [val_comb_inds_map[ind] for ind in bkg_inds if ind in val_comb_inds_map] #REMAP 1
+            
+            labels = np.zeros(len(val_comb_inds))
+            labels[:len(sig_inds)] = 1 #Sig_inds in the front
 
             shuffled_inds = np.random.permutation(len(labels))
             feature_matrix = feature_matrix[shuffled_inds]
             labels = labels[shuffled_inds]
 
-            index_map = {old_idx: new_idx for new_idx, old_idx in enumerate(shuffled_inds)}
+            shuffled_map = {i: shuffled_inds[i] for i in range(len(shuffled_inds))}
 
-            # Update signal and background indices using the mapping
-            sig_inds = [index_map[i] for i in sig_inds]
-            bkg_inds = [index_map[i] for i in bkg_inds]
+            sig_inds = [shuffled_map[i] for i in sig_inds]
+            bkg_inds = [shuffled_map[i] for i in bkg_inds] #REMAP 2
+
+            trk_i = trk_1_array[evt]
+            trk_j = trk_2_array[evt]
+            dca = dca_array[evt]
+            deltaR = deltaR_array[evt]
+            rel_ip2d = rel_ip2d_array[evt]
+            rel_ip3d = rel_ip3d_array[evt]
+
+            edge_index, edge_features = create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_inds)
+            if edge_index.shape[1] == 0:
+                continue
+            #REMAP 1
+            edge_index = np.array([[val_comb_inds_map[edge_index[0, i]], val_comb_inds_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
+            #REMAP 2
+            edge_index = np.array([[shuffled_map[edge_index[0, i]], shuffled_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
             
-            #print("Signal after shuffling", sig_inds)
-            #print("Bkg after shuffling", bkg_inds)
-            #print("Labels after shuffling", labels)
-
-            edge_index = create_edge_index(sig_inds, bkg_inds)
 
             hadron_weight = 1  # Default weight
 
@@ -145,7 +140,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             had_data = Data(
                 x=torch.tensor(feature_matrix, dtype=torch.float),
                 y=torch.tensor(labels, dtype=torch.float),
-                edge_index=edge_index,
+                edge_index=torch.tensor(edge_index, dtype=torch.int64),
+                edge_attr=torch.tensor(edge_features, dtype=torch.float),
                 had_weight=torch.tensor([hadron_weight], dtype=torch.float)
             )
             had_objects.append(had_data)
@@ -154,7 +150,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
 print("Creating hadron training objects...")
 had_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
-                                    seed_array, SV_ind_array, had_pt_array, trk_features)
+                                    seed_array, SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+                                    dca_array, rel_ip2d_array, rel_ip3d_array, trk_features)
 print(f"Saving had_data to haddata_{args.save_tag}.pkl...")
 with open("haddata_" + args.save_tag + ".pkl", 'wb') as f:
     pickle.dump(had_data, f)
