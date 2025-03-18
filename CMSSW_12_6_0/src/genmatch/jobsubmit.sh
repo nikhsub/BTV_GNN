@@ -6,4 +6,4 @@ INPATH=/eos/uscms$(xrdfsls /store/group/lpcljm/nvenkata/BTV/ttbarlep_120files_11
 #INPATH=/eos/uscms/store/group/lpcljm/nvenkata/BTVH/files
 
 
-python condor_analyze.py -i $INPATH -o 1203_ttbar_lep_dca -ec 3000
+python condor_analyze.py -i $INPATH -o 1403_ttbar_lep_dca -ec 3000

@@ -33,7 +33,7 @@ sig_ind_array = datatree['sig_ind'].array()
 sig_flag_array = datatree['sig_flag'].array()
 bkg_flag_array = datatree['bkg_flag'].array()
 bkg_ind_array = datatree['bkg_ind'].array()
-seed_array = datatree['seed_ind'].array()
+#seed_array = datatree['seed_ind'].array()
 SV_ind_array = datatree['SVtrk_ind'].array()
 had_pt_array = datatree['had_pt'].array()
 trk_1_array  = datatree['trk_1'].array()
@@ -68,7 +68,7 @@ def create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_in
 
 
 def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
-                   seed_array, SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+                   SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
                    dca_array, rel_ip2d_array, rel_ip3d_array, trk_features, nevts=3):
 
     had_objects = []
@@ -125,9 +125,15 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             if edge_index.shape[1] == 0:
                 continue
             #REMAP 1
-            edge_index = np.array([[val_comb_inds_map[edge_index[0, i]], val_comb_inds_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
-            #REMAP 2
-            edge_index = np.array([[shuffled_map[edge_index[0, i]], shuffled_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
+            #edge_index = np.array([[val_comb_inds_map[edge_index[0, i]], val_comb_inds_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
+            ##REMAP 2
+            #edge_index = np.array([[shuffled_map[edge_index[0, i]], shuffled_map[edge_index[1, i]]] for i in range(edge_index.shape[1])]).T
+
+            # First remap using val_comb_inds_map
+            edge_index = np.vectorize(val_comb_inds_map.get)(edge_index)
+            
+            # Second remap using shuffled_map
+            edge_index = np.vectorize(shuffled_map.get)(edge_index)
             
 
             hadron_weight = 1  # Default weight
@@ -150,7 +156,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
 print("Creating hadron training objects...")
 had_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
-                                    seed_array, SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+                                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
                                     dca_array, rel_ip2d_array, rel_ip3d_array, trk_features)
 print(f"Saving had_data to haddata_{args.save_tag}.pkl...")
 with open("haddata_" + args.save_tag + ".pkl", 'wb') as f:

@@ -10,14 +10,14 @@ import torch_geometric
 from torch_geometric.nn import knn_graph
 from torch_geometric.data import Data, DataLoader
 from torch.utils.data import random_split
-import pickle
+import pickle5 as pickle
 from tqdm import tqdm
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
 import os
 import torch.nn.functional as F
 import math
-from model import *
+from GATModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
@@ -34,6 +34,7 @@ args = parser.parse_args()
 glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+edge_features = ['dca', 'deltaR', 'rel_ip2d', 'rel_ip3d']
 
 batchsize = 512
 
@@ -44,10 +45,10 @@ if args.load_had != "":
     if os.path.isdir(args.load_had):
         print(f"Loading training data from {args.load_had}...")
         pkl_files = [os.path.join(args.load_had, f) for f in os.listdir(args.load_had) if f.endswith('.pkl')]
-    for pkl_file in pkl_files:
-        print(f"Loading {pkl_file}...")
+    for pkl_file in tqdm(pkl_files, desc="Loading .pkl files", unit="file"):
         with open(pkl_file, 'rb') as f:
             train_hads.extend(pickle.load(f))
+
 
 if args.load_evt != "":
     print(f"Loading event level data from {args.load_evt}...")
@@ -66,8 +67,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32, heads=8, dropout=0.2)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=8, dropout=0.2)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -164,11 +165,11 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
         batch_had_weight = 1
-        edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
+        #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
-        node_embeds1, preds1 = model(data.x, edge_index)
-        weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)
-        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weight)
+        node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+        #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)
+        loss_fn = torch.nn.BCEWithLogitsLoss()
         node_loss = loss_fn(preds1, data.y.float().unsqueeze(1)) * batch_had_weight 
         
         #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
@@ -180,7 +181,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
             cont_loss = torch.tensor(0.0, device=device)
         else:
             edge_index2 = shuffle_edge_index(data.edge_index).to(device)
-            node_embeds2, logits2 = model(data.x, edge_index2)
+            node_embeds2, logits2, _, _, _ = model(data.x, edge_index2)
             cont_loss = contrastive_loss(node_embeds1, node_embeds2)
 
         #batch_had_weight = data.had_weight[data.batch].mean().to(device)
@@ -227,9 +228,9 @@ def test(model, test_loader, device, epoch, k=11, thres=0.5):
             
             #batch.x = scale_features(batch.x, scale_mean, scale_std)
             
-            edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
+            #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, logits = model(batch.x, edge_index)
+            _, logits, _, _, _ = model(batch.x, batch.edge_index, batch.edge_attr)
             preds = torch.sigmoid(logits)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
@@ -281,15 +282,15 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     for i, data in enumerate(val_graphs):
         with torch.no_grad():
             data = data.to(device)
-            edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-            _, logits = model(data.x, edge_index)
+            #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
+            _, logits, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
             preds = torch.sigmoid(logits)
             preds = preds.squeeze()
-            labels = data.y.float()
-            #siginds = data.siginds.cpu().numpy()
-            ##labels = np.zeros(len(preds))
-            #labels = torch.zeros(len(preds), device=device)
-            #labels[siginds] = 1  # Set signal indices to 1
+            #labels = data.y.float()
+            siginds = data.siginds.cpu().numpy()
+            #labels = np.zeros(len(preds))
+            labels = torch.zeros(len(preds), device=device)
+            labels[siginds] = 1  # Set signal indices to 1
             evt_loss = F.binary_cross_entropy(preds, labels)
             total_loss += evt_loss.item()
             num_samps +=1

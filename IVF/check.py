@@ -20,11 +20,14 @@ for i, data in enumerate(evt_data):
     print("EVENT", i)
 
     #print("LABELS", data.y)
-    print("DATA", data.x[:, 7])
+    
+    print("DATA", data.x)
     #print("SEEDS", data.seeds)
     #print("SIGINDS", data.siginds)
     #print("SIGFLAGS", data.sigflags)
-    #print("LABELS", data.y)
+    print("LABELS", data.y)
+    print("EDGE INDEX", data.edge_index)
+    print("EDGE ATTR", data.edge_attr)
     #print("SVINDS", data.svinds)
     
     #print("Total tracks: ", data.x.size(0))

@@ -16,7 +16,7 @@ from tqdm import tqdm
 import os
 import torch.nn.functional as F
 import math
-from model import *
+from GATModel import *
 import pprint
 import matplotlib.pyplot as plt
 import joblib
@@ -36,6 +36,8 @@ parser.add_argument("-had", "--hadron", default=False, action='store_true', help
 args = parser.parse_args()
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+
+edge_features = ['dca', 'deltaR', 'rel_ip2d', 'rel_ip3d']
 
 def evaluate_xgb(graphs, model):
 
@@ -73,8 +75,7 @@ def evaluate(graphs, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            edge_index = knn_graph(data.x, k=12, batch=None, loop=False).to(device)
-            _, logits = model(data.x, edge_index)
+            _, logits = model(data.x, data.edge_index, data.edge_attr)
             preds = torch.sigmoid(logits)
             preds = preds.squeeze().cpu().numpy()
                 
@@ -119,7 +120,7 @@ def evaluate(graphs, model, device):
     return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr #Recall is the same thing as tpr
 
 #model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 32, heads=8, dropout=0.2)
+model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=8, dropout=0.2)
 model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
