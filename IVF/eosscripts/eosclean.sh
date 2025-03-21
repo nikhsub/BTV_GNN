@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set the EOS directory you want to clean
-EOS_DIR="/store/user/nvenkata"
+EOS_DIR="/store/user/nvenkata/BTV/toproc/evttrain"
 
 # Check if the directory exists
 if eosls "$EOS_DIR" &> /dev/null; then

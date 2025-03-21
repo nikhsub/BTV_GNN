@@ -5,7 +5,7 @@ from GATModel import *
 model = GNNModel(indim=12, outdim=32, edge_dim=4, heads=8, dropout=0.25)  # Use the same hyperparameters!
 
 # Load trained weights
-model.load_state_dict(torch.load("model_files/model_test1703_best.pth"))
+model.load_state_dict(torch.load("model_files/model_dca_1703_best.pth"))
 
 # Move model to evaluation mode
 model.eval()

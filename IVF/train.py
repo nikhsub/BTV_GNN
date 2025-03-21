@@ -36,7 +36,7 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'rel_ip2d', 'rel_ip3d']
 
-batchsize = 512
+batchsize = 1024
 
 #LOADING DATA
 train_hads = []
@@ -55,7 +55,7 @@ if args.load_evt != "":
     with open(args.load_evt, 'rb') as f:
         val_evts = pickle.load(f)
 
-train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
+#train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
 #val_evts   = val_evts[0:1500]
 
 train_len = int(0.8 * len(train_hads))
@@ -67,7 +67,7 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=8, dropout=0.2)
+model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=6, dropout=0.4)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
@@ -160,17 +160,18 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     total_eff_loss  = 0
 
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
-        with torch.no_grad(): data= data.to(device)
+        data= data.to(device)
 
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
-        batch_had_weight = 1
+        #batch_had_weight = 1
+        
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
         node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
-        #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)
-        loss_fn = torch.nn.BCEWithLogitsLoss()
-        node_loss = loss_fn(preds1, data.y.float().unsqueeze(1)) * batch_had_weight 
+        weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
+        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weight)
+        node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
         
         #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
         #node_loss = focal_loss(preds1, data.y.float().unsqueeze(1))

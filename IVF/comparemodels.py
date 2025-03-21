@@ -75,7 +75,7 @@ def evaluate(graphs, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            _, logits = model(data.x, data.edge_index, data.edge_attr)
+            _, logits, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
             preds = torch.sigmoid(logits)
             preds = preds.squeeze().cpu().numpy()
                 
@@ -120,7 +120,7 @@ def evaluate(graphs, model, device):
     return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr #Recall is the same thing as tpr
 
 #model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=8, dropout=0.2)
+model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=6, dropout=0.40)
 model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

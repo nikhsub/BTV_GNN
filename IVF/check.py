@@ -21,14 +21,14 @@ for i, data in enumerate(evt_data):
 
     #print("LABELS", data.y)
     
-    print("DATA", data.x)
+    print("DATA", data.x.size(0))
     #print("SEEDS", data.seeds)
     #print("SIGINDS", data.siginds)
     #print("SIGFLAGS", data.sigflags)
-    print("LABELS", data.y)
+    print("SIGINDS", data.siginds)
     print("EDGE INDEX", data.edge_index)
-    print("EDGE ATTR", data.edge_attr)
-    #print("SVINDS", data.svinds)
+    print("EDGE ATTR", data.edge_attr.size(0))
+    print("SVINDS", data.svinds)
     
     #print("Total tracks: ", data.x.size(0))
     #seed_tracks = data.seeds.nonzero(as_tuple=True)[0]

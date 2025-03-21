@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 import os
 import torch.nn.functional as F
 import math
-from conmodel import *
+from GATModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
@@ -59,7 +59,7 @@ def shuffle_edge_index(edge_index):
     return new_edge_index
 
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, pos, neg, bce_loss=True):
+def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     model.to(device)
     model.train()
     total_loss=0
@@ -73,8 +73,9 @@ def train(model, train_loader, optimizer, device, epoch, pos, neg, bce_loss=True
         num_nodes = data.x.size(0)
         batch_had_weight = 1
         
-        node_embeds1, preds1 = model(data.x, data.edge_index)
-        node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=pos, neg_weight=neg)*batch_had_weight
+        node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+        loss_fn = torch.nn.BCEWithLogitsLoss()
+        node_loss = loss_fn(preds1, data.y.float().unsqueeze(1)) * batch_had_weight
 
         if bce_loss:
             cont_loss = torch.tensor(0.0, device=device)
@@ -115,8 +116,8 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     for i, data in enumerate(val_graphs):
         with torch.no_grad():
             data = data.to(device)
-            edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-            _, preds = model(data.x, edge_index)
+            _, logits, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+            preds = torch.sigmoid(logits)
             preds = preds.squeeze()
             siginds = data.siginds.cpu().numpy()
             #labels = np.zeros(len(preds))
@@ -150,26 +151,24 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
 def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     # Hyperparameter suggestions
-    hidden_dim = trial.suggest_categorical("hidden_dim", [4, 8, 16])
-    num_heads = trial.suggest_categorical("num_heads", [2, 4, 8, 10])
+    hidden_dim = trial.suggest_categorical("hidden_dim", [16, 32, 64])
+    num_heads = trial.suggest_categorical("num_heads", [2,3,4,5,6])
     dropout_rate = trial.suggest_uniform("dropout", 0.0, 0.5)
-    learning_rate = trial.suggest_loguniform("lr", 1e-5, 1e-3)
-    pos_weight = trial.suggest_uniform("pos_weight", 1.0, 10.0)
-    neg_weight = trial.suggest_uniform("neg_weight", 1.0, 10.0)
-    k = trial.suggest_int("k", 5.0, 12.0)
+    learning_rate = trial.suggest_loguniform("lr", 1e-6, 1e-3)
 
     # Initialize model, optimizer, and loss function
-    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, heads=num_heads, dropout=dropout_rate).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=4, heads=num_heads, dropout=dropout_rate).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     best_metric = 0
     patience_counter = 0
 
     for epoch in range(30):  # Early stopping after 20 epochs
-        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, pos_weight, neg_weight)
-        _,_,_,prec, bg_rej = validate(model, val_loader, device, epoch, k=k, target_sigeff=sigeff)
+        print("EPOCH", epoch+1)
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch)
+        _,_,_,prec, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
 
-        metric = prec + bg_rej
+        metric = prec
 
         if metric > best_metric:
             best_metric = metric
@@ -180,9 +179,7 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
                 "num_heads": num_heads,
                 "dropout_rate": dropout_rate,
                 "learning_rate": learning_rate,
-                "pos_weight": pos_weight,
-                "neg_weight": neg_weight,
-                "k": k,
+                "bg_rej": bg_rej,
                 "metric": metric
             }
             patience_counter = 0
@@ -196,7 +193,7 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
         if patience_counter >= 5:  # Stop if no improvement for 5 epochs
             break
 
-        return best_metric
+    return best_metric
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("GNN training")
@@ -212,7 +209,7 @@ if __name__ == "__main__":
     
     trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
     
-    batchsize = 200
+    batchsize = 1024
     
     #LOADING DATA
     train_hads = []
@@ -221,8 +218,7 @@ if __name__ == "__main__":
         if os.path.isdir(args.load_train):
             print(f"Loading training data from {args.load_train}...")
             pkl_files = [os.path.join(args.load_train, f) for f in os.listdir(args.load_train) if f.endswith('.pkl')]
-        for pkl_file in pkl_files:
-            print(f"Loading {pkl_file}...")
+        for pkl_file in tqdm(pkl_files, desc="Loading .pkl files", unit="file"):
             with open(pkl_file, 'rb') as f:
                 train_hads.extend(pickle.load(f))
     
@@ -254,16 +250,16 @@ if __name__ == "__main__":
 
     print(f"Best hyperparameters saved")
     
-    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=4, heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["lr"])
 
     best_metric = 0.0  # Track the best validation AUC
     best_model_path = "best_hyperopt_model_"+args.modeltag+".pth"  # Path to save the best model
 
     for epoch in range(int(args.epochs)):
-        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, study.best_params["pos_weight"], study.best_params["neg_weight"])
-        _,_,_,prec, bg_rej = validate(model, val_evts, device, epoch, k=study.best_params["k"], target_sigeff=float(args.sigeff))
-        metric = prec+bg_rej
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch)
+        _,_,_,prec, bg_rej = validate(model, val_evts, device, epoch, target_sigeff=float(args.sigeff))
+        metric = prec
         print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Metric = {metric:.4f}")
 
         if metric > best_metric:

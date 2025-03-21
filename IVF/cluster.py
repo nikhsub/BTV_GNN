@@ -14,7 +14,7 @@ from tqdm import tqdm
 import os
 import torch.nn.functional as F
 import math
-from conmodel import *
+from GATModel import *
 import matplotlib.pyplot as plt
 import joblib
 from sklearn.neighbors import NearestNeighbors
@@ -44,7 +44,7 @@ if args.load_train != "":
 
 val_graphs = train_graphs[0:20]
 
-model = GNNModel(len(trk_features), outdim=16, heads=4, dropout=0.354)
+model = GNNModel(len(trk_features), edge_dim=4, outdim=32, heads=6, dropout=0.4)
 
 model.load_state_dict(torch.load(args.load_model))
 
@@ -59,8 +59,9 @@ all_true_labels = []
 for i, data in enumerate(val_graphs):
     with torch.no_grad():
         data = data.to(device)
-        edge_index = knn_graph(data.x, k=6, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-        _, preds = model(data.x, edge_index)
+        #edge_index = knn_graph(data.x, k=6, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
+        _, logits, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        preds = torch.sigmoid(logits)
 
 
         preds = preds.squeeze().cpu().numpy()
