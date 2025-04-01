@@ -115,7 +115,7 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array,
         rel_ip2d = rel_ip2d_array[evt]
         rel_ip3d = rel_ip3d_array[evt]
     
-        dca_thres = get_dca_thres(trk_i, trk_j, dca, evtsiginds)*2
+        dca_thres = get_dca_thres(trk_i, trk_j, dca, evtsiginds)*5
         evtbkginds = list(set(bkg_ind_array[evt]))
         evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
     

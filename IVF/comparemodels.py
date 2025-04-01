@@ -65,7 +65,7 @@ def evaluate_xgb(graphs, model):
     fpr, tpr, _ = roc_curve(all_labels, all_preds)
     roc_auc = auc(fpr, tpr)
 
-    return precision, recall, pr_auc, fpr, tpr, roc_auc
+    return precision, recall, pr_auc, fpr, tpr, roc_auc, all_preds, all_labels
 
 def evaluate(graphs, model, device):
 
@@ -75,7 +75,7 @@ def evaluate(graphs, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            _, logits, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+            _, logits, _, _, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
             preds = torch.sigmoid(logits)
             preds = preds.squeeze().cpu().numpy()
                 
@@ -117,10 +117,10 @@ def evaluate(graphs, model, device):
     sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
     sv_precision = sv_tp / (sv_tp + sv_fp) if (sv_tp + sv_fp) > 0 else 0
 
-    return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr #Recall is the same thing as tpr
+    return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr, all_preds, all_labels #Recall is the same thing as tpr
 
 #model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=6, dropout=0.40)
+model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=4, dropout=0.40)
 model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -135,9 +135,9 @@ with open(args.file, 'rb') as f:
 
 # Evaluate both files
 print("Running GNN inference....")
-p1, r1, auc1, sv_p1, sv_r1, fpr1, tpr1, roc_auc1, sv_tpr1, sv_fpr1 = evaluate(graphs, model1, device)
+p1, r1, auc1, sv_p1, sv_r1, fpr1, tpr1, roc_auc1, sv_tpr1, sv_fpr1, all_preds_GNN, all_labels_GNN = evaluate(graphs, model1, device)
 print("Running xgb inference...")
-p2, r2, auc2, fpr2, tpr2, roc_auc2 = evaluate_xgb(graphs, model2)
+p2, r2, auc2, fpr2, tpr2, roc_auc2, all_preds_XGB, all_labels_XGB = evaluate_xgb(graphs, model2)
 
 # Plot the ROC curves
 plt.figure(figsize=(10, 8))
@@ -168,11 +168,45 @@ plt.grid()
 plt.savefig(f"ROC_modcompare_{args.savetag}_log.png")
 plt.close()
 
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if torch.is_tensor(tensor) else tensor
 
+gnn_preds = to_numpy(all_preds_GNN)
+gnn_labels = to_numpy(all_labels_GNN)
 
-                
+xgb_preds = to_numpy(all_preds_XGB)
+xgb_labels = to_numpy(all_labels_XGB)
 
+# Separate signal and background
+gnn_sig = gnn_preds[gnn_labels == 1]
+gnn_bkg = gnn_preds[gnn_labels == 0]
+xgb_sig = xgb_preds[xgb_labels == 1]
+xgb_bkg = xgb_preds[xgb_labels == 0]
 
-        
-            
+# Plot side-by-side
+fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+
+bins = 50
+
+# GNN subplot
+axs[0].hist(gnn_sig, bins=bins, alpha=0.5, label='Signal', color='red', density=True)
+axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=True)
+axs[0].set_yscale('log')
+axs[0].set_title("GNN Prediction Scores")
+axs[0].set_xlabel("Prediction Score")
+axs[0].set_ylabel("Density (log scale)")
+axs[0].legend()
+axs[0].grid(True)
+
+# XGB subplot
+axs[1].hist(xgb_sig, bins=bins, alpha=0.5, label='Signal', color='orange', density=True)
+axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='green', density=True)
+axs[1].set_yscale('log')
+axs[1].set_title("XGBoost Prediction Scores")
+axs[1].set_xlabel("Prediction Score")
+axs[1].legend()
+axs[1].grid(True)
+
+plt.tight_layout()
+plt.savefig(f"output_dist_{args.savetag}.png", dpi=300)
 
