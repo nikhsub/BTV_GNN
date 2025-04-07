@@ -34,7 +34,7 @@ config.JobType.pluginName = 'Analysis'
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
 config.Data.totalUnits = 120
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/BTV/ttbarlep_120files_'+str(timestamp)
+config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/ttbarlep_120files_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'

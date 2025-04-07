@@ -41,10 +41,16 @@ trk_1_array  = datatree['trk_1'].array()
 trk_2_array  = datatree['trk_2'].array()
 deltaR_array  = datatree['deltaR'].array()
 dca_array  = datatree['dca'].array()
-rel_ip2d_array  = datatree['rel_ip2d'].array()
-rel_ip3d_array  = datatree['rel_ip3d'].array()
+dca_sig_array  = datatree['dca_sig'].array()
+cptopv_array  = datatree['cptopv'].array()
+pvtoPCA_1_array  = datatree['pvtoPCA_1'].array()
+pvtoPCA_2_array  = datatree['pvtoPCA_2'].array()
+dotprod_1_array  = datatree['dotprod_1'].array()
+dotprod_2_array  = datatree['dotprod_2'].array()
+pair_mom_array  = datatree['pair_mom'].array()
+pair_invmass_array  = datatree['pair_invmass'].array()
 
-def create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_inds, dca_threshold=0.05):
+def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds, dca_threshold=0.05):
     """
     Create edge index and edge features for tracks in val_comb_inds using DCA-based clustering.
     
@@ -52,15 +58,21 @@ def create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_in
     """
 
     # Convert to numpy for fast indexing
-    trk_i_np = trk_i.to_numpy()
-    trk_j_np = trk_j.to_numpy()
+    trk_1_np = trk_1.to_numpy()
+    trk_2_np = trk_2.to_numpy()
     dca_np = dca.to_numpy()
     deltaR_np = deltaR.to_numpy()
-    rel_ip2d_np = rel_ip2d.to_numpy()
-    rel_ip3d_np = rel_ip3d.to_numpy()
+    dca_sig_np = dca_sig.to_numpy()
+    cptopv_np = cptopv.to_numpy()
+    pvtoPCA_1_np = pvtoPCA_1.to_numpy()
+    pvtoPCA_2_np = pvtoPCA_2.to_numpy()
+    dotprod_1_np = dotprod_1.to_numpy()
+    dotprod_2_np = dotprod_2.to_numpy()
+    pair_mom_np = pair_mom.to_numpy()
+    pair_invmass_np = pair_invmass.to_numpy()
 
     # Filter based on val_comb_inds (valid track indices)
-    valid_edge_mask = np.isin(trk_i_np, val_comb_inds) & np.isin(trk_j_np, val_comb_inds)
+    valid_edge_mask = np.isin(trk_1_np, val_comb_inds) & np.isin(trk_2_np, val_comb_inds)
 
     # Apply DCA threshold for clustering
     dca_mask = dca_np < dca_threshold  # Only keep edges with small DCA
@@ -69,14 +81,16 @@ def create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, val_comb_in
     final_mask = valid_edge_mask & dca_mask
 
     # Extract valid edges and their features
-    edge_index = np.vstack([trk_i_np[final_mask], trk_j_np[final_mask]]).astype(np.int64)
+    edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
     edge_features = np.vstack([dca_np[final_mask], deltaR_np[final_mask],
-                               rel_ip2d_np[final_mask], rel_ip3d_np[final_mask]]).T
+                               dca_sig_np[final_mask], cptopv_np[final_mask],
+                                pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], 
+                                dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
 
     return edge_index, edge_features
 
-def get_dca_thres(trk_i, trk_j, dca, evtsiginds):
-        sig_mask = np.isin(trk_i, evtsiginds) & np.isin(trk_j, evtsiginds)
+def get_dca_thres(trk_1, trk_2, dca, evtsiginds):
+        sig_mask = np.isin(trk_1, evtsiginds) & np.isin(trk_2, evtsiginds)
 
         sig_dca_values = dca[sig_mask]
 
@@ -89,7 +103,8 @@ def get_dca_thres(trk_i, trk_j, dca, evtsiginds):
 
 def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
-                   dca_array, rel_ip2d_array, rel_ip3d_array, trk_features, nevts=3):
+                   dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
+                   dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features, nevts=3):
 
     evt_objects = []
 
@@ -110,17 +125,23 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
         evtsiginds = list(set(sig_ind_array[evt]))
 
-        trk_i = trk_1_array[evt]
-        trk_j = trk_2_array[evt]
+        trk_1 = trk_1_array[evt]
+        trk_2 = trk_2_array[evt]
         dca = dca_array[evt]
         deltaR = deltaR_array[evt]
-        rel_ip2d = rel_ip2d_array[evt]
-        rel_ip3d = rel_ip3d_array[evt]
+        dca_sig = dca_sig_array[evt]
+        cptopv = cptopv_array[evt]
+        pvtoPCA_1 = pvtoPCA_1_array[evt]
+        pvtoPCA_2 = pvtoPCA_2_array[evt]
+        dotprod_1 = dotprod_1_array[evt]
+        dotprod_2 = dotprod_2_array[evt]
+        pair_mom = pair_mom_array[evt]
+        pair_invmass = pair_invmass_array[evt]
         
         if(not args.test):
-            dca_thres = get_dca_thres(trk_i, trk_j, dca, evtsiginds)
+            dca_thres = get_dca_thres(trk_1, trk_2, dca, evtsiginds)*5
         else:
-            dca_thres = 0.01*3 #For test events
+            dca_thres = 2 #For test events
             
         evtsigflags = [sig_flag_array[evt][np.where(sig_ind_array[evt] == ind)[0][0]] for ind in evtsiginds]
         evtbkginds = list(set(bkg_ind_array[evt]))
@@ -137,15 +158,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
         evtsvinds  = [val_inds_map[ind] for ind in evtsvinds if ind in val_inds_map]
         evtsigflags = [flag for ind, flag in zip(sig_ind_array[evt], evtsigflags) if ind in valid_indices]
         
-        trk_i = trk_1_array[evt]
-        trk_j = trk_2_array[evt]
-        dca = dca_array[evt]
-        deltaR = deltaR_array[evt]
-        rel_ip2d = rel_ip2d_array[evt]
-        rel_ip3d = rel_ip3d_array[evt]
     
-        
-        edge_index, edge_features = create_edge_index(trk_i, trk_j, dca, deltaR, rel_ip2d, rel_ip3d, valid_indices, dca_threshold=dca_thres)
+        edge_index, edge_features = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices, dca_threshold=dca_thres)
         if edge_index.shape[1] == 0:
             continue
         
@@ -163,6 +177,10 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             edge_index=torch.tensor(edge_index, dtype=torch.int64),
             edge_attr=torch.tensor(edge_features, dtype=torch.float) 
         )
+        print("X", fullfeatmat.shape)
+        print("edgeindex", edge_index.shape)
+        print("edgefeat", edge_features.shape)
+        print("Contains NaNs:", np.isnan(edge_features).any())
         evt_objects.append(evt_data)
 
     return evt_objects
@@ -170,7 +188,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 print("Creating data objects...")
 evt_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
                                     SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
-                                    dca_array, rel_ip2d_array, rel_ip3d_array, trk_features)
+                                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
+                                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features)
 
 print(f"Saving evt_data to evtvaldata_{args.save_tag}.pkl...")
 with open("evtvaldata_" + args.save_tag + ".pkl", 'wb') as f:

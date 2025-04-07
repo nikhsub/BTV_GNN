@@ -34,9 +34,9 @@ args = parser.parse_args()
 glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
-edge_features = ['dca', 'deltaR', 'rel_ip2d', 'rel_ip3d']
+edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 700
+batchsize = 1024
 
 #LOADING DATA
 train_hads = []
@@ -56,7 +56,7 @@ if args.load_evt != "":
         val_evts = pickle.load(f)
 
 #train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
-val_evts   = val_evts[0:1500]
+#val_evts   = val_evts[0:1500]
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
@@ -67,8 +67,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=4, dropout=0.4)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=6, dropout=0.4)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -168,7 +168,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
-        node_embeds1, preds1, _,_,_,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
         weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
         loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weight)
         node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
@@ -182,7 +182,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
             cont_loss = torch.tensor(0.0, device=device)
         else:
             edge_index2 = shuffle_edge_index(data.edge_index).to(device)
-            node_embeds2, logits2, _,_,_,_,_ = model(data.x, edge_index2)
+            node_embeds2, logits2, _,_,_, = model(data.x, edge_index2)
             cont_loss = contrastive_loss(node_embeds1, node_embeds2)
 
         #batch_had_weight = data.had_weight[data.batch].mean().to(device)
@@ -231,7 +231,7 @@ def test(model, test_loader, device, epoch, k=11, thres=0.5):
             
             #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, logits, _,_,_,_,_ = model(batch.x, batch.edge_index, batch.edge_attr)
+            _, logits, _,_,_ = model(batch.x, batch.edge_index, batch.edge_attr)
             preds = torch.sigmoid(logits)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
@@ -282,19 +282,36 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
     for i, data in enumerate(val_graphs):
         with torch.no_grad():
-            data = data.to(device)
-            #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-            _, logits, _,_,_,_,_ = model(data.x, data.edge_index, data.edge_attr)
-            preds = torch.sigmoid(logits)
-            preds = preds.squeeze()
-            #labels = data.y.float()
-            siginds = data.siginds.cpu().numpy()
-            #labels = np.zeros(len(preds))
-            labels = torch.zeros(len(preds), device=device)
-            labels[siginds] = 1  # Set signal indices to 1
-            evt_loss = F.binary_cross_entropy(preds, labels)
-            total_loss += evt_loss.item()
-            num_samps +=1
+            try:
+                data = data.to(device)
+                #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
+                _, logits, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+                preds = torch.sigmoid(logits)
+                preds = preds.squeeze()
+                logits_cpu = logits.detach().cpu()
+                preds_cpu = preds.detach().cpu()
+                #labels = data.y.float()
+                siginds = data.siginds.cpu().numpy()
+                #labels = np.zeros(len(preds))
+                labels = torch.zeros(len(preds), device=device)
+                labels[siginds] = 1  # Set signal indices to 1
+                evt_loss = F.binary_cross_entropy(preds, labels)
+                total_loss += evt_loss.item()
+                num_samps +=1
+            except Exception as e:
+                print(f"\n Exception at val batch {i}")
+                print(f"data.x: {data.x.shape}, edge_index: {data.edge_index.shape}")
+                print("logits stats:", logits_cpu.min().item(), logits_cpu.max().item())
+                print("preds stats:", preds_cpu.min().item(), preds_cpu.max().item())
+                print("any NaNs in preds:", torch.isnan(preds_cpu).any().item())
+                print("any > 1 in preds:", (preds_cpu > 1).any().item())
+                print("any < 0 in preds:", (preds_cpu < 0).any().item())
+                print(f"siginds max: {siginds.max()}, preds len: {len(preds_cpu)}")
+                print("siginds:", siginds)
+
+                # You can comment this next line if grad norm isn't essential
+                grad_norm = sum((p.grad.norm().item() if p.grad is not None else 0.0) for p in model.parameters())
+                print("grad norm:", grad_norm)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -321,7 +338,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 best_metric = 1e6
 patience = 10
 no_improve = 0
-val_every = 10
+val_every = 5
 
 rolling_bce_loss = []
 stabilization_epochs = 5  # Number of epochs to track for stabilization

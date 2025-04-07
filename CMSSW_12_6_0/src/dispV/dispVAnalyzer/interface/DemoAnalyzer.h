@@ -25,6 +25,7 @@
 #include "DataFormats/PatCandidates/interface/PackedCandidate.h"
 #include "DataFormats/Candidate/interface/Candidate.h"
 #include "DataFormats/Candidate/interface/VertexCompositePtrCandidate.h"
+#include "DataFormats/VertexReco/interface/Vertex.h"
 #include "DataFormats/HepMCCandidate/interface/GenParticle.h"
 #include "DataFormats/JetReco/interface/PFJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
@@ -39,7 +40,7 @@
 
 //ROOT
 #include "TTree.h"
-
+#include "TVector3.h"
 #include "math.h"
 
 //Transient Track
@@ -49,6 +50,7 @@
 #include "TrackingTools/TrajectoryState/interface/TrajectoryStateClosestToPoint.h"
 #include "TrackingTools/TransientTrack/interface/TransientTrack.h"
 #include "TrackingTools/PatternTools/interface/TwoTrackMinimumDistance.h"
+#include "RecoVertex/VertexTools/interface/VertexDistance3D.h"
 
 //Pileup info
 #include "SimDataFormats/PileupSummaryInfo/interface/PileupSummaryInfo.h"
@@ -131,8 +133,15 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<int> trk_j;
       std::vector<float> deltaR;
       std::vector<float> dca;
-      std::vector<float> rel_ip2d;
-      std::vector<float> rel_ip3d;
+      std::vector<float> dca_sig;
+      std::vector<float> cptopv;
+      std::vector<float> pvtoPCA_i;
+      std::vector<float> pvtoPCA_j;
+      std::vector<float> dotprod_i;
+      std::vector<float> dotprod_j;
+      std::vector<float> pair_mom;
+      std::vector<float> pair_invmass;
+      
       
       std::vector<int> njets;
       std::vector<float> jet_pt;

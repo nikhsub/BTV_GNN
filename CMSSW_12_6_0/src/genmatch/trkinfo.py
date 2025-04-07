@@ -62,14 +62,19 @@ trk_charge      = std.vector('double')()
 had_pt          = std.vector('double')()
 nhads           = std.vector('int')()
 
-
 missed_sig      = std.vector('int')()
 trk_1           = std.vector('int')()
 trk_2           = std.vector('int')()
 deltaR          = std.vector('double')()
 dca             = std.vector('double')()
-rel_ip2d        = std.vector('double')()
-rel_ip3d        = std.vector('double')()
+dca_sig         = std.vector('double')()
+cptopv          = std.vector('double')()
+pvtoPCA_1       = std.vector('double')()
+pvtoPCA_2       = std.vector('double')()
+dotprod_1       = std.vector('double')()
+dotprod_2       = std.vector('double')()
+pair_mom        = std.vector('double')()
+pair_invmass    = std.vector('double')()
 
 branches = {
     "had_pt": had_pt, "sig_flag": sig_flag, "sig_flav": sig_flav, "sig_ind": sig_ind, "bkg_ind": bkg_ind,
@@ -78,7 +83,8 @@ branches = {
     "trk_pt": trk_pt, "trk_eta": trk_eta, "trk_phi": trk_phi, "trk_nValid": trk_nValid,
     "trk_nValidPixel": trk_nValidPixel, "trk_nValidStrip": trk_nValidStrip, "trk_charge": trk_charge,
     "missed_sig": missed_sig, "trk_1": trk_1, "trk_2": trk_2, "deltaR": deltaR,
-    "dca": dca, "rel_ip2d": rel_ip2d, "rel_ip3d": rel_ip3d
+    "dca": dca, "dca_sig": dca_sig, "cptopv": cptopv, "pvtoPCA_1": pvtoPCA_1, "pvtoPCA_2": pvtoPCA_2,
+    "dotprod_1": dotprod_1, "dotprod_2": dotprod_2, "pair_mom": pair_mom, "pair_invmass": pair_invmass
 }
 
 for name, branch in branches.items():
@@ -118,8 +124,14 @@ for i, evt in enumerate(tree):
     trk_2.assign(list(evt.trk_j))
     deltaR.assign(list(evt.deltaR))
     dca.assign(list(evt.dca))
-    rel_ip2d.assign(list(evt.rel_ip2d))
-    rel_ip3d.assign(list(evt.rel_ip3d))
+    dca_sig.assign(list(evt.dca_sig))
+    cptopv.assign(list(evt.cptopv))
+    pvtoPCA_1.assign(list(evt.pvtoPCA_i))
+    pvtoPCA_2.assign(list(evt.pvtoPCA_j))
+    dotprod_1.assign(list(evt.dotprod_i))
+    dotprod_2.assign(list(evt.dotprod_j))
+    pair_mom.assign(list(evt.pair_mom))
+    pair_invmass.assign(list(evt.pair_invmass))
 
     trk_ip2d.assign(list(evt.trk_ip2d))
     trk_ip3d.assign(list(evt.trk_ip3d))

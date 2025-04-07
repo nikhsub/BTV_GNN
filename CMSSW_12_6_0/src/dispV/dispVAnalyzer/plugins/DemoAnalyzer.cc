@@ -175,8 +175,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   trk_j.clear();
   deltaR.clear();
   dca.clear();
-  rel_ip2d.clear();
-  rel_ip3d.clear();
+  dca_sig.clear();
+  cptopv.clear();
+  pvtoPCA_i.clear();
+  pvtoPCA_j.clear();
+  dotprod_i.clear();
+  dotprod_j.clear();
+  pair_mom.clear();
+  pair_invmass.clear();
 
   nSVs.clear();
   SV_x.clear();
@@ -294,8 +300,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     trk_j.reserve(estimated_pairs);
     deltaR.reserve(estimated_pairs);
     dca.reserve(estimated_pairs);
-    rel_ip2d.reserve(estimated_pairs);
-    rel_ip3d.reserve(estimated_pairs);
+    dca_sig.reserve(estimated_pairs);
+    cptopv.reserve(estimated_pairs);
+    pvtoPCA_i.reserve(estimated_pairs);
+    pvtoPCA_j.reserve(estimated_pairs);
+    dotprod_i.reserve(estimated_pairs);
+    dotprod_j.reserve(estimated_pairs);
+    pair_mom.reserve(estimated_pairs);
+    pair_invmass.reserve(estimated_pairs); 
 	
    // Parallelize the outer loop
     #pragma omp parallel for
@@ -312,17 +324,71 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             float delta_r_val = reco::deltaR(eta1, phi1, eta2, phi2);
     
             if (delta_r_val > 0.4) continue;
+	
+	    const float PION_MASS = 0.13957018; // GeV (charged pion mass)
+        
+            // Get 3-momenta (px, py, pz)
+            float px1 = alltracks[i].px();
+            float py1 = alltracks[i].py();
+            float pz1 = alltracks[i].pz();
+            
+            float px2 = alltracks[j].px();
+            float py2 = alltracks[j].py();
+            float pz2 = alltracks[j].pz();
+
+            // Calculate energies (E = sqrt(p² + m²))
+            float e1 = sqrt(px1*px1 + py1*py1 + pz1*pz1 + PION_MASS*PION_MASS);
+            float e2 = sqrt(px2*px2 + py2*py2 + pz2*pz2 + PION_MASS*PION_MASS);
+
+            // Compute invariant mass
+            float sum_px = px1 + px2;
+            float sum_py = py1 + py2;
+            float sum_pz = pz1 + pz2;
+            float sum_e  = e1 + e2;
+            
+            float inv_mass = sqrt(sum_e*sum_e - (sum_px*sum_px + sum_py*sum_py + sum_pz*sum_pz));
     
             float dca_val = -1.0;  // Default invalid value
-            TwoTrackMinimumDistance minDist;
-            if (minDist.calculate(t_trks[i].initialFreeState(), t_trks[j].initialFreeState())) {
-                dca_val = minDist.distance();
-            }
-    
-            if (dca_val > 0.2) continue;
-    
-            float rel_ip2d_val = fabs(ip2d_vals[i].value() - ip2d_vals[j].value());
-            float rel_ip3d_val = fabs(ip3d_vals[i].value() - ip3d_vals[j].value());
+	    float cptopv_val = -1.0;
+            float pvToPCAseed_val = -1.0;
+            float pvToPCAtrack_val = -1.0;
+            float dotprodTrack_val = -999.0;
+            float dotprodSeed_val = -999.0;
+            float dcaSig_val = -1.0;
+            float pairMomentumMag = -1.0;
+
+	    TwoTrackMinimumDistance minDist;
+            if (minDist.calculate(t_trks[i].impactPointState(), t_trks[j].impactPointState())) {
+
+            	VertexDistance3D distanceComputer;
+            	auto m = distanceComputer.distance(
+            	    VertexState(minDist.points().second, t_trks[i].impactPointState().cartesianError().position()),
+            	    VertexState(minDist.points().first, t_trks[j].impactPointState().cartesianError().position()));
+            	dca_val = m.value();
+	    	if(m.error() > 0){
+	    	    dcaSig_val = m.value() / m.error();
+	    	}
+	
+	    	GlobalPoint cp(minDist.crossingPoint());
+            	GlobalPoint pvp(pv.x(), pv.y(), pv.z());
+   	    	 
+	    	GlobalPoint seedPCA = minDist.points().second;  // PCA of track i (seed)
+	    	GlobalPoint trackPCA = minDist.points().first;  // PCA of track j
+   	    	
+	    	pvToPCAseed_val = (seedPCA - pvp).mag();      // Distance PV to seed track's PCA
+	    	pvToPCAtrack_val = (trackPCA - pvp).mag();    // Distance PV to other track's PCA
+            	
+            	// Calculate additional variables
+            	cptopv_val = (cp - pvp).mag();
+            	dotprodTrack_val = (trackPCA - pvp).unit().dot(t_trks[j].impactPointState().globalDirection().unit());
+            	dotprodSeed_val = (seedPCA - pvp).unit().dot(t_trks[i].impactPointState().globalDirection().unit());
+            	
+            	// Pair momentum
+            	GlobalVector pairMomentum((Basic3DVector<float>)(t_trks[i].track().momentum() + t_trks[j].track().momentum()));
+            	pairMomentumMag = pairMomentum.mag();
+	     }
+
+	     if (dca_val > 0.2) continue;	
     
             #pragma omp critical
             {
@@ -330,8 +396,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
                 trk_j.push_back(j);
                 deltaR.push_back(delta_r_val);
                 dca.push_back(dca_val);
-                rel_ip2d.push_back(rel_ip2d_val);
-                rel_ip3d.push_back(rel_ip3d_val);
+		dca_sig.push_back(dcaSig_val);
+		cptopv.push_back(cptopv_val);
+		pvtoPCA_j.push_back(pvToPCAtrack_val);
+		pvtoPCA_i.push_back(pvToPCAseed_val);
+		dotprod_j.push_back(dotprodTrack_val);
+		dotprod_i.push_back(dotprodSeed_val);
+		pair_mom.push_back(pairMomentumMag);
+		pair_invmass.push_back(inv_mass);
             }
         }
     }
@@ -513,8 +585,15 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("trk_j", &trk_j);
 	tree->Branch("deltaR", &deltaR);
 	tree->Branch("dca", &dca);
-	tree->Branch("rel_ip2d", &rel_ip2d);
-	tree->Branch("rel_ip3d", &rel_ip3d);
+	tree->Branch("dca_sig", &dca_sig);
+        tree->Branch("cptopv", &cptopv);
+	tree->Branch("pvtoPCA_i", &pvtoPCA_i);
+	tree->Branch("pvtoPCA_j", &pvtoPCA_j);
+	tree->Branch("dotprod_i", &dotprod_i);
+	tree->Branch("dotprod_j", &dotprod_j);
+	tree->Branch("pair_mom", &pair_mom);
+	tree->Branch("pair_invmass", &pair_invmass);
+	
 
 	//tree->Branch("nJets", &njets);
 	//tree->Branch("jet_pt", &jet_pt);

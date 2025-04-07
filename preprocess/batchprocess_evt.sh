@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Directory paths
-INPUT_DIR="/store/user/nvenkata/BTV/toproc/evttrain"
+INPUT_DIR="/store/user/nvenkata/BTV/toproc/"
 #INPUT_DIR="/uscms/home/nvenkata/nobackup/higgs+c/preprocess/toproc"
-OUTPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/files/training/evt_ttbar_lep_300k"  # Set your output directory for .pkl files
+OUTPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/files/training/evt_ttbar_lep_0204"  # Set your output directory for .pkl files
 EOS_PREFIX="root://cmseos.fnal.gov/"
 #EOS_PREFIX=""
 
