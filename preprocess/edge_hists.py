@@ -25,48 +25,39 @@ edge_feature_data = {
     "BB": [[] for _ in range(NUM_EDGE_FEATURES)],
 }
 
-IDX_CPTOPV = 3
-IDX_PVTOPCA1 = 4
-IDX_PVTOPCA2 = 5
-IDX_PAIR_MOM = 8
-IDX_PAIR_INV = 9
+edge_type_counts = {"SS": 0, "SB": 0, "BB": 0}
 
 # 🔄 Process each event
 for evt_data in evt_data_list:
     edge_index = evt_data.edge_index
     edge_attr = evt_data.edge_attr
-    siginds = evt_data.siginds.cpu().numpy()
+    #siginds = evt_data.siginds.cpu().numpy()
+    labels = evt_data.y.cpu().numpy()
     num_nodes = evt_data.x.shape[0]
 
-    if edge_index.shape[1] == 0 or len(siginds) == 0:
+    if edge_index.shape[1] == 0 or np.sum(labels)==0: #len(siginds) == 0:
         continue
 
     is_sig = np.zeros(num_nodes, dtype=bool)
-    is_sig[siginds] = True
+    is_sig[np.where(labels==1)] = True
 
     for e_idx in range(edge_index.shape[1]):
         i = edge_index[0, e_idx].item()
         j = edge_index[1, e_idx].item()
         
-        cptopv = edge_attr[e_idx, IDX_CPTOPV].item()
-        pair_mom = edge_attr[e_idx, IDX_PAIR_MOM].item()
-        pvtoPCA1 = edge_attr[e_idx, IDX_PVTOPCA1].item()
-        pvtoPCA2 = edge_attr[e_idx, IDX_PVTOPCA2].item()
-        pair_inv = edge_attr[e_idx, IDX_PAIR_INV].item()
-
-        if cptopv > 400 or pair_mom > 500 or pair_inv > 10 or pvtoPCA1 > 400 or pvtoPCA2 > 400:
-            continue  # skip this edge entirely
-
         if is_sig[i] and is_sig[j]:
             tag = "SS"
         elif is_sig[i] or is_sig[j]:
             tag = "SB"
         else:
             tag = "BB"
+        edge_type_counts[tag] += 1
 
         for f in range(NUM_EDGE_FEATURES):
             val = edge_attr[e_idx, f].item()
             edge_feature_data[tag][f].append(val)
+
+print("Edge type counts:", edge_type_counts)
 
 # 📈 Plot histograms for each edge feature
 for f, feat_name in enumerate(edge_feature_names):

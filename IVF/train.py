@@ -67,7 +67,7 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=6, dropout=0.4)
+model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=4, dropout=0.25)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
@@ -79,7 +79,7 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=2.0, alpha=0.80):
+def focal_loss(preds, labels, gamma=1.5, alpha=0.95):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
@@ -169,12 +169,12 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
         node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
-        weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
-        loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=weight)
-        node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
+        #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
+        #loss_fn = torch.nn.BCEWithLogitsLoss()
+        #node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
         
         #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
-        #node_loss = focal_loss(preds1, data.y.float().unsqueeze(1))
+        node_loss = focal_loss(preds1, data.y.float().unsqueeze(1))
         #eff_loss = target_eff_loss(preds1, data.y.float().unsqueeze(1), target_tpr=0.70, scale=0.1)
         eff_loss = torch.tensor(0.0, device=device)
 
@@ -336,7 +336,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     return roc_auc, pr_auc, avg_loss, precision_at_sigeff, bg_rejection_at_sigeff
 
 best_metric = 1e6
-patience = 10
+patience = 5
 no_improve = 0
 val_every = 5
 

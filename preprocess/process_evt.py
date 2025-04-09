@@ -44,7 +44,7 @@ dotprod_2_array  = datatree['dotprod_2'].array()
 pair_mom_array  = datatree['pair_mom'].array()
 pair_invmass_array  = datatree['pair_invmass'].array()
 
-def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds, dca_threshold=0.05):
+def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds):
     """
     Create edge index and edge features for tracks in val_comb_inds using DCA-based clustering.
 
@@ -68,31 +68,29 @@ def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvt
     # Filter based on val_comb_inds (valid track indices)
     valid_edge_mask = np.isin(trk_1_np, val_comb_inds) & np.isin(trk_2_np, val_comb_inds)
 
-    # Apply DCA threshold for clustering
-    dca_mask = dca_np < dca_threshold  # Only keep edges with small DCA
+    feature_mask = (
+        (cptopv_np < 15) &
+        (dca_np < 0.125) &
+        (dca_sig_np < 30) &
+        (pvtoPCA_1_np < 15) &
+        (pvtoPCA_2_np < 15) &
+        (np.abs(dotprod_1_np) > 0.75) &
+        (np.abs(dotprod_2_np) > 0.75) &
+        (pair_invmass_np < 5) &
+        (pair_mom_np < 100)
+    )
+
 
     # Combine both masks
-    final_mask = valid_edge_mask & dca_mask
+    final_mask = valid_edge_mask & feature_mask
 
     # Extract valid edges and their features
-    edge_index = np.vstack([trk_2_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
+    edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
     edge_features = np.vstack([dca_np[final_mask], deltaR_np[final_mask],
                                dca_sig_np[final_mask], cptopv_np[final_mask],
                                 pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
 
     return edge_index, edge_features
-
-def get_dca_thres(trk_1, trk_2, dca, evtsiginds):
-        sig_mask = np.isin(trk_1, evtsiginds) & np.isin(trk_2, evtsiginds)
-
-        sig_dca_values = dca[sig_mask]
-
-        if len(sig_dca_values) > 0:
-            avg_sig_dca = np.mean(sig_dca_values)
-        else:
-            avg_sig_dca = 0.01  # No signal track pairs found, default val
-
-        return avg_sig_dca
 
 def create_event_graphs(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
@@ -136,7 +134,6 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array,
         pair_mom = pair_mom_array[evt]
         pair_invmass = pair_invmass_array[evt]
     
-        dca_thres = get_dca_thres(trk_1, trk_2, dca, evtsiginds)*5
         evtbkginds = list(set(bkg_ind_array[evt]))
         evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
     
@@ -146,12 +143,11 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array,
 
         evtbkginds = [val_inds_map[ind] for ind in evtbkginds if ind in val_inds_map]
         
-        edge_index, edge_features = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices, dca_threshold=dca_thres)
+        edge_index, edge_features = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices)
         if edge_index.shape[1] == 0:
             continue
         
         edge_index = np.vectorize(val_inds_map.get)(edge_index)
-
 
         labels = np.zeros(len(fullfeatmat), dtype=np.float32)
         labels[evtsiginds] = 1  # Label signal as 1

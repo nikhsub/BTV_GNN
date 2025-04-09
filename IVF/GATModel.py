@@ -12,10 +12,10 @@ class GNNModel(torch.nn.Module):
         self.proj_skip = nn.Linear(indim, (2*indim//heads)*heads)
 
         self.edge_encoder = nn.Sequential(
+        nn.LayerNorm(edge_dim),
         nn.Linear(edge_dim, outdim//2),
         nn.ReLU(),  # more stable than LeakyReLU here
-        nn.Linear(outdim//2, outdim),
-        nn.Tanh()   # clamp output ∈ [-1, 1]
+        nn.Linear(outdim//2, outdim)
         ) 
 
         self.gat1 = GATv2Conv(indim, 2*indim//heads, edge_dim=outdim, heads=heads, concat=True, dropout=0.2)
@@ -34,7 +34,7 @@ class GNNModel(torch.nn.Module):
         
         self.final_proj = nn.Linear((2*indim//heads)*heads, (2*outdim//heads)*heads)
 
-        catout = (2*outdim//heads)*heads
+        catout = (2*outdim//heads)*heads + outdim
 
         self.node_pred = nn.Sequential(
             nn.Linear(catout, catout//2),
@@ -47,11 +47,9 @@ class GNNModel(torch.nn.Module):
         )
 
     def forward(self, x_in, edge_index, edge_attr):
-        x = self.bn0(x_in.clamp(-1000, 1000))
+        x = self.bn0(x_in)
 
         edge_attr_enc = self.edge_encoder(edge_attr)
-        edge_attr_enc = F.normalize(edge_attr_enc, p=2, dim=-1, eps=1e-6)
-        edge_attr_enc = torch.nan_to_num(edge_attr_enc, nan=0.0, posinf=1.0, neginf=-1.0)
 
         x1, attn1 = self.gat1(x, edge_index, edge_attr=edge_attr_enc, return_attention_weights=True)
         if torch.isnan(x1).any():
@@ -84,6 +82,15 @@ class GNNModel(torch.nn.Module):
         xf = torch.sigmoid(self.alpha) * final_x1 + (1 - torch.sigmoid(self.alpha)) * x3
         if torch.isnan(xf).any():
             print("NaNs in final output xf")
+
+        num_nodes = x.size(0)
+        edge_feats_sum = torch.zeros((num_nodes, edge_attr_enc.size(1)), device=x.device)
+        edge_feats_sum = edge_feats_sum.index_add(0, edge_index[1], edge_attr_enc)
+        
+        deg = torch.bincount(edge_index[1], minlength=num_nodes).clamp(min=1).unsqueeze(1).float()
+        edge_feats_mean = edge_feats_sum / deg
+        
+        xf = torch.cat([xf, edge_feats_mean], dim=1)
 
         node_probs = self.node_pred(xf)
 
