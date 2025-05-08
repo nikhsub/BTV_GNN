@@ -18,6 +18,13 @@ class GNNModel(torch.nn.Module):
         nn.Linear(outdim//2, outdim)
         ) 
 
+        self.edge_classifier = nn.Sequential(
+        nn.Linear(edge_dim, edge_dim // 2),
+        nn.ReLU(),
+        nn.Linear(edge_dim // 2, 1),
+        nn.Sigmoid()
+        )
+
         self.gat1 = GATv2Conv(indim, 2*indim//heads, edge_dim=outdim, heads=heads, concat=True, dropout=0.2)
         self.gat2 = GATv2Conv((2*indim//heads)*heads, outdim//heads, edge_dim=outdim, heads=heads, concat=True, dropout=0.25, negative_slope=0.2)
         self.gat3 = GATv2Conv((outdim//heads)*heads, (outdim*2)//heads, edge_dim=outdim, heads=heads, concat=True, dropout=0.3, negative_slope=0.2)
@@ -32,9 +39,9 @@ class GNNModel(torch.nn.Module):
         self.skip_weight = nn.Parameter(torch.tensor(0.01), requires_grad=False)
         self.alpha = nn.Parameter(torch.tensor(0.3), requires_grad=True)  # Learnable mix parameter
         
-        self.final_proj = nn.Linear((2*indim//heads)*heads, (2*outdim//heads)*heads)
+        self.final_proj = nn.Linear((2*indim//heads)*heads, (outdim//heads)*heads)
 
-        catout = (2*outdim//heads)*heads + outdim
+        catout = (outdim//heads)*heads + outdim
 
         self.node_pred = nn.Sequential(
             nn.Linear(catout, catout//2),
@@ -50,6 +57,9 @@ class GNNModel(torch.nn.Module):
         x = self.bn0(x_in)
 
         edge_attr_enc = self.edge_encoder(edge_attr)
+
+        edge_weights = self.edge_classifier(edge_attr).view(-1, 1)
+        edge_attr_enc = edge_attr_enc * edge_weights
 
         x1, attn1 = self.gat1(x, edge_index, edge_attr=edge_attr_enc, return_attention_weights=True)
         if torch.isnan(x1).any():
@@ -68,18 +78,18 @@ class GNNModel(torch.nn.Module):
         x2 = F.leaky_relu(x2)
         x2 = self.drop2(x2)
 
-        x3, attn3 = self.gat3(x2, edge_index, edge_attr=edge_attr_enc, return_attention_weights=True)
-        if torch.isnan(x3).any():
-            print("NaNs after gat3")
-        x3 = self.bn3(x3)
-        x3 = F.leaky_relu(x3)
-        x3 = self.drop3(x3)
+        #x3, attn3 = self.gat3(x2, edge_index, edge_attr=edge_attr_enc, return_attention_weights=True)
+        #if torch.isnan(x3).any():
+        #    print("NaNs after gat3")
+        #x3 = self.bn3(x3)
+        #x3 = F.leaky_relu(x3)
+        #x3 = self.drop3(x3)
         
         final_x1 = self.final_proj(x1)
         if torch.isnan(final_x1).any():
             print("NaNs in final_proj")
 
-        xf = torch.sigmoid(self.alpha) * final_x1 + (1 - torch.sigmoid(self.alpha)) * x3
+        xf = torch.sigmoid(self.alpha) * final_x1 + (1 - torch.sigmoid(self.alpha)) * x2
         if torch.isnan(xf).any():
             print("NaNs in final output xf")
 
@@ -93,6 +103,8 @@ class GNNModel(torch.nn.Module):
         xf = torch.cat([xf, edge_feats_mean], dim=1)
 
         node_probs = self.node_pred(xf)
+        
+        attn3 = None
 
         return xf, node_probs, attn1, attn2, attn3
 

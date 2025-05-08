@@ -120,7 +120,7 @@ def evaluate(graphs, model, device):
     return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr, all_preds, all_labels #Recall is the same thing as tpr
 
 #model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=4, dropout=0.25)
+model1 = GNNModel(len(trk_features), 32, edge_dim=len(edge_features), heads=4, dropout=0.22)
 model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -189,18 +189,18 @@ fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
 bins = 50
 
 # GNN subplot
-axs[0].hist(gnn_sig, bins=bins, alpha=0.5, label='Signal', color='red', density=True)
-axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=True)
+axs[0].hist(gnn_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
+axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
 axs[0].set_yscale('log')
 axs[0].set_title("GNN Prediction Scores")
 axs[0].set_xlabel("Prediction Score")
-axs[0].set_ylabel("Density (log scale)")
+axs[0].set_ylabel("# of tracks")
 axs[0].legend()
 axs[0].grid(True)
 
 # XGB subplot
-axs[1].hist(xgb_sig, bins=bins, alpha=0.5, label='Signal', color='orange', density=True)
-axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='green', density=True)
+axs[1].hist(xgb_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
+axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
 axs[1].set_yscale('log')
 axs[1].set_title("XGBoost Prediction Scores")
 axs[1].set_xlabel("Prediction Score")

@@ -12,10 +12,21 @@ class GNNModel(torch.nn.Module):
         self.proj_skip = nn.Linear(indim, (2*indim//heads)*heads)
 
         self.edge_encoder = nn.Sequential(
+            nn.LayerNorm(edge_dim),
             nn.Linear(edge_dim, outdim//2),
-            nn.LeakyReLU(),
+            nn.ReLU(),
             nn.Linear(outdim//2, outdim),
-            nn.LeakyReLU()
+        )
+
+        self.edge_classifier = nn.Sequential(
+        #nn.Linear(edge_dim, edge_dim*2),
+        #nn.Linear(edge_dim*2, edge_dim*4),
+        #nn.Linear(edge_dim*4, edge_dim*2),
+        #nn.Linear(edge_dim*2, edge_dim),
+        nn.Linear(edge_dim, edge_dim // 2),
+        nn.ReLU(),
+        nn.Linear(edge_dim // 2, 1),
+        nn.Sigmoid()
         )
 
         self.gat1 = GATv2Conv(indim, 2*indim//heads, edge_dim=outdim, heads=heads, concat=True, dropout=0.2)
@@ -34,7 +45,7 @@ class GNNModel(torch.nn.Module):
         self.drop1 = nn.Dropout(p=0.3)
         self.drop2 = nn.Dropout(p=dropout)
         self.drop3 = nn.Dropout(p=0.2)
-        self.drop4 = nn.Dropout(p=0.1)
+        self.drop4 = nn.Dropout(p=dropout)
         self.drop5 = nn.Dropout(p=0.1)
         
         self.skip_weight = nn.Parameter(torch.tensor(0.01), requires_grad=False)
@@ -42,7 +53,7 @@ class GNNModel(torch.nn.Module):
         
         self.final_proj = nn.Linear((2*indim//heads)*heads, (4*outdim//heads)*heads)
 
-        catout = (4*outdim//heads)*heads
+        catout = (4*outdim//heads)*heads + outdim
 
         self.node_pred = nn.Sequential(
             nn.Linear(catout, catout//2),
@@ -58,8 +69,9 @@ class GNNModel(torch.nn.Module):
         x = self.bn0(x_in)
 
         edge_attr_enc = self.edge_encoder(edge_attr)
-        edge_attr_enc = F.normalize(edge_attr_enc, p=2, dim=-1)
-
+        edge_weights = self.edge_classifier(edge_attr).view(-1, 1)
+        edge_attr_enc = edge_attr_enc * edge_weights
+        
         x1, attn1 = self.gat1(x, edge_index, edge_attr=edge_attr_enc, return_attention_weights=True)
         x1 = self.bn1(x1)
         x1 = F.leaky_relu(x1)
@@ -91,8 +103,17 @@ class GNNModel(torch.nn.Module):
         final_x1 = self.final_proj(x1)
 
         xf = torch.sigmoid(self.alpha) * final_x1 + (1 - torch.sigmoid(self.alpha)) * x5
+        
+        num_nodes = x.size(0)
+        edge_feats_sum = torch.zeros((num_nodes, edge_attr_enc.size(1)), device=x.device)
+        edge_feats_sum = edge_feats_sum.index_add(0, edge_index[1], edge_attr_enc)
+
+        deg = torch.bincount(edge_index[1], minlength=num_nodes).clamp(min=1).unsqueeze(1).float()
+        edge_feats_mean = edge_feats_sum / deg
+
+        xf = torch.cat([xf, edge_feats_mean], dim=1)
 
         node_probs = self.node_pred(xf)
 
-        return xf, node_probs, attn1, attn2, attn3, attn4, attn5
+        return xf, node_probs, attn1, attn2, attn3
 

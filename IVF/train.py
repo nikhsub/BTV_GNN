@@ -61,14 +61,14 @@ if args.load_evt != "":
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
 
-train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=16)
+train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=32)
 test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=8)
 
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=32, edge_dim=len(edge_features), heads=4, dropout=0.25)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00005) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features), heads=4, dropout=0.22)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -79,12 +79,24 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=1.5, alpha=0.95):
+def focal_loss(preds, labels, gamma=2.8, alpha=0.94):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
     pt = torch.exp(-bce_loss)  # Probability of correct classification
     focal_weight = (1 - pt) ** gamma
+    loss = alpha * focal_weight * bce_loss
+    return loss.mean()
+
+def focal_loss2(preds, labels, gamma=2.5, alpha_pos=0.98, alpha_neg=0.02, margin=0.3):
+    labels = labels.float()
+    margin_tensor = torch.where(labels == 1, -margin, margin)
+    preds_adj = preds + margin_tensor
+
+    bce_loss = F.binary_cross_entropy_with_logits(preds_adj, labels, reduction='none')
+    pt = torch.exp(-bce_loss)
+    focal_weight = (1 - pt) ** gamma
+    alpha = torch.where(labels == 1, alpha_pos, alpha_neg)
     loss = alpha * focal_weight * bce_loss
     return loss.mean()
 
@@ -131,17 +143,47 @@ def contrastive_loss(x1, x2, temperature=0.5):
 
     return loss
 
-def shuffle_edge_index(edge_index):
+def sampled_contrastive_loss(x1, x2, temperature=0.5, num_negatives=32):
+    x1 = F.normalize(x1, dim=1)
+    x2 = F.normalize(x2, dim=1)
+
+    N = x1.size(0)
+    device = x1.device
+
+    loss = 0.0
+    for i in range(N):
+        anchor = x1[i].unsqueeze(0)  # [1, D]
+        positive = x2[i].unsqueeze(0)  # [1, D]
+
+        # Sample random negatives (excluding i)
+        neg_indices = torch.randperm(N, device=device)
+        neg_indices = neg_indices[neg_indices != i][:num_negatives]
+
+        negatives = x2[neg_indices]  # [num_negatives, D]
+
+        # Compute similarities
+        pos_sim = torch.matmul(anchor, positive.T) / temperature  # [1, 1]
+        neg_sim = torch.matmul(anchor, negatives.T) / temperature  # [1, num_negatives]
+
+        logits = torch.cat([pos_sim, neg_sim], dim=1)  # [1, 1 + num_negatives]
+        labels = torch.zeros(1, dtype=torch.long, device=device)  # positive is first entry
+
+        loss += F.cross_entropy(logits, labels)
+
+    return loss
+
+def drop_edges(edge_index, edge_attr, drop_percent):
     num_edges = edge_index.size(1)
+    num_keep = int(num_edges * (1 - drop_percent))
 
-    # Shuffle the target nodes (row 1) while keeping the sources (row 0) the same
-    shuffled_targets = edge_index[1, torch.randperm(num_edges, device=edge_index.device)]
+    # Generate random permutation of indices and keep the first num_keep
+    perm = torch.randperm(num_edges, device=edge_index.device)[:num_keep]
 
-    # Combine the original sources with the shuffled targets
-    new_edge_index = torch.stack([edge_index[0], shuffled_targets], dim=0)
-    bidirectional_edges = torch.cat([new_edges, new_edges.flip(0)], dim=1)
+    # Apply permutation to keep a subset of edges
+    new_edge_index = edge_index[:, perm]
+    new_edge_attr = edge_attr[perm] 
 
-    return bidirectional_edges
+    return new_edge_index, new_edge_attr
 
 def compute_class_weights(labels):
     """Dynamically compute class weights based on dataset distribution."""
@@ -169,12 +211,20 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
         node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        
+        #edge_index2, edge_attr2 = drop_edges(data.edge_index, data.edge_attr, 0.5)
+        #node_embeds2, _, _,_,_ = model(data.x, edge_index2, edge_attr2)
+        
         #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
         #loss_fn = torch.nn.BCEWithLogitsLoss()
         #node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
         
         #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
         node_loss = focal_loss(preds1, data.y.float().unsqueeze(1))
+
+        #del preds1, edge_index2, edge_attr2   # Helps free memory from large prediction tensor
+        #torch.cuda.empty_cache()
+        #cont_loss = sampled_contrastive_loss(node_embeds1, node_embeds2)
         #eff_loss = target_eff_loss(preds1, data.y.float().unsqueeze(1), target_tpr=0.70, scale=0.1)
         eff_loss = torch.tensor(0.0, device=device)
 
@@ -185,9 +235,9 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
             node_embeds2, logits2, _,_,_, = model(data.x, edge_index2)
             cont_loss = contrastive_loss(node_embeds1, node_embeds2)
 
-        #batch_had_weight = data.had_weight[data.batch].mean().to(device)
+        batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
-        loss = (cont_loss * 0.05) + node_loss + eff_loss
+        loss = cont_loss + node_loss
 
         loss.backward()
         optimizer.step()
@@ -335,10 +385,10 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
     return roc_auc, pr_auc, avg_loss, precision_at_sigeff, bg_rejection_at_sigeff
 
-best_metric = 1e6
-patience = 5
+best_metric = -1
+patience = 8
 no_improve = 0
-val_every = 5
+val_every = 10
 
 rolling_bce_loss = []
 stabilization_epochs = 5  # Number of epochs to track for stabilization
@@ -397,9 +447,9 @@ for epoch in range(int(args.epochs)):
         val_auc, pr_auc, val_loss, prec, bg_rej = validate(model, val_evts, device, epoch, k=12, target_sigeff=0.70)
         print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
 
-        metric = val_loss
+        metric = pr_auc
 
-        if metric < best_metric:
+        if metric > best_metric:
             best_metric = metric
             no_improve = 0
 

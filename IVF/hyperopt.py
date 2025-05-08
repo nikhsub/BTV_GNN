@@ -47,6 +47,15 @@ def contrastive_loss(x1, x2, temperature=0.5):
 
     return loss
 
+def focal_loss(preds, labels, gamma=2.3, alpha=0.98):
+    """Focal loss to emphasize hard-to-classify samples"""
+    loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
+    bce_loss = loss_fn(preds, labels)
+    pt = torch.exp(-bce_loss)  # Probability of correct classification
+    focal_weight = (1 - pt) ** gamma
+    loss = alpha * focal_weight * bce_loss
+    return loss.mean()
+
 def shuffle_edge_index(edge_index):
     num_edges = edge_index.size(1)
 
@@ -59,7 +68,7 @@ def shuffle_edge_index(edge_index):
     return new_edge_index
 
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
+def train(model, train_loader, optimizer, device, epoch, alpha, gamma, bce_loss=True):
     model.to(device)
     model.train()
     total_loss=0
@@ -72,10 +81,13 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
         batch_had_weight = 1
+
+        node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        node_loss = focal_loss(preds1, data.y.float().unsqueeze(1), gamma=gamma, alpha=alpha)
         
-        node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
-        loss_fn = torch.nn.BCEWithLogitsLoss()
-        node_loss = loss_fn(preds1, data.y.float().unsqueeze(1)) * batch_had_weight
+        #node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+        #loss_fn = torch.nn.BCEWithLogitsLoss()
+        #node_loss = loss_fn(preds1, data.y.float().unsqueeze(1)) * batch_had_weight
 
         if bce_loss:
             cont_loss = torch.tensor(0.0, device=device)
@@ -86,7 +98,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
 
         #batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
-        loss = (cont_loss * 0.05) + node_loss
+        loss = cont_loss + node_loss
 
         loss.backward()
         optimizer.step()
@@ -151,13 +163,15 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
 def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     # Hyperparameter suggestions
-    hidden_dim = trial.suggest_categorical("hidden_dim", [16, 32, 64])
-    num_heads = trial.suggest_categorical("num_heads", [2,3,4,5,6])
-    dropout_rate = trial.suggest_uniform("dropout", 0.0, 0.5)
+    hidden_dim = trial.suggest_categorical("hidden_dim", [16, 32])
+    num_heads = trial.suggest_categorical("num_heads", [4,5,6])
+    dropout_rate = trial.suggest_uniform("dropout", 0.1, 0.25)
     learning_rate = trial.suggest_loguniform("lr", 1e-6, 1e-3)
+    gamma = trial.suggest_uniform("gamma", 2.0, 3.0)
+    alpha = trial.suggest_uniform("alpha", 0.90, 0.99)
 
     # Initialize model, optimizer, and loss function
-    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=4, heads=num_heads, dropout=dropout_rate).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=len(edge_features), heads=num_heads, dropout=dropout_rate).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     best_metric = 0
@@ -165,7 +179,7 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
 
     for epoch in range(30):  # Early stopping after 20 epochs
         print("EPOCH", epoch+1)
-        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch)
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, alpha, gamma)
         _,_,_,prec, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
 
         metric = prec
@@ -208,6 +222,7 @@ if __name__ == "__main__":
     glob_test_thres = 0.5
     
     trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+    edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
     
     batchsize = 1024
     
@@ -250,14 +265,14 @@ if __name__ == "__main__":
 
     print(f"Best hyperparameters saved")
     
-    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=4, heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=len(edge_features), heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["lr"])
 
     best_metric = 0.0  # Track the best validation AUC
     best_model_path = "best_hyperopt_model_"+args.modeltag+".pth"  # Path to save the best model
 
     for epoch in range(int(args.epochs)):
-        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch)
+        train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, alpha=study.best_params["alpha"], gamma=study.best_params["gamma"])
         _,_,_,prec, bg_rej = validate(model, val_evts, device, epoch, target_sigeff=float(args.sigeff))
         metric = prec
         print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Metric = {metric:.4f}")
