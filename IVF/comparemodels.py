@@ -16,7 +16,7 @@ from tqdm import tqdm
 import os
 import torch.nn.functional as F
 import math
-from GATModel import *
+from GCNModel import *
 import pprint
 import matplotlib.pyplot as plt
 import joblib
