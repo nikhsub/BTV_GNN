@@ -42,14 +42,18 @@ class GNNModel(torch.nn.Module):
         nn.Sigmoid()
         )
 
-        self.edge_mlpconv1 = EdgeMLPConv(indim, outdim, outdim//2)
-        self.edge_mlpconv2 = EdgeMLPConv(outdim//2, outdim, outdim)
+        self.edge_mlpconv1 = EdgeMLPConv(indim, outdim, outdim//4)
+        self.edge_mlpconv2 = EdgeMLPConv(outdim//4, outdim, outdim//2)
+        self.edge_mlpconv3 = EdgeMLPConv(outdim//2, outdim, outdim)
 
-        self.bn1 = nn.LayerNorm(outdim//2)
+        self.bn1 = nn.LayerNorm(outdim//4)
         self.drop1 = nn.Dropout(p=0.3)
         
-        self.bn2 = nn.LayerNorm(outdim)
+        self.bn2 = nn.LayerNorm(outdim//2)
         self.drop2 = nn.Dropout(p=0.2)
+
+        self.bn3 = nn.LayerNorm(outdim)
+        self.drop3 = nn.Dropout(p=0.1)
 
         self.skip_weight = nn.Parameter(torch.tensor(0.01), requires_grad=False)
 
@@ -80,10 +84,14 @@ class GNNModel(torch.nn.Module):
         x2 = self.bn2(x2)
         x2 = F.relu(x2)
         x2 = self.drop2(x2)
-     
+
+        x3 = self.edge_mlpconv3(x2, edge_index, edge_attr_enc)
+        x3 = self.bn3(x3)
+        x3 = F.relu(x3)
+        x3 = self.drop3(x3)
 
         x_proj = self.proj_skip(x)
-        xf = self.skip_weight * x_proj + x2
+        xf = self.skip_weight * x_proj + x3
 
         num_nodes = x.size(0)
         edge_feats_sum = torch.zeros((num_nodes, edge_attr_enc.size(1)), device=x.device)
