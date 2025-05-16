@@ -36,7 +36,7 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 2048
+batchsize = 1024
 
 #LOADING DATA
 train_hads = []
@@ -67,7 +67,7 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features), heads=4, dropout=0.22)
+model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features), heads=4, dropout=0.22)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
@@ -200,6 +200,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
     total_node_loss = 0
     total_cont_loss = 0
     total_eff_loss  = 0
+    all_gate_values = []
 
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
         data= data.to(device)
@@ -247,14 +248,16 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         total_node_loss += node_loss.item()
         total_cont_loss += cont_loss.item()
         total_eff_loss  += eff_loss.item()
+        all_gate_values.append(model.last_gate.mean().item())
 
     avg_loss = total_loss / len(train_loader)
     avg_node_loss = total_node_loss / len(train_loader)
     avg_cont_loss = total_cont_loss / len(train_loader)
     avg_eff_loss  = total_eff_loss / len(train_loader)
+    avg_gate_val = sum(all_gate_values) / len(all_gate_values)
 
     #print(f"No seed hadrons: {nosigseeds}")
-    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss
+    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss, avg_gate_val
 
 #TEST
 def test(model, test_loader, device, epoch, k=11, thres=0.5):
@@ -419,7 +422,7 @@ stats = {
 
 for epoch in range(int(args.epochs)):
     if using_bce_loss:
-        tot_loss, node_loss, cont_loss, eff_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
+        tot_loss, node_loss, cont_loss, eff_loss, gate_val = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
         rolling_bce_loss.append(node_loss)
         if len(rolling_bce_loss) > stabilization_epochs:
             rolling_bce_loss.pop(0)
@@ -504,8 +507,8 @@ for epoch in range(int(args.epochs)):
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Node Loss: {node_loss:.4f}, Eff Loss: {eff_loss:.4f}")
-    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test Loss: {test_loss:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Avg gate value: {gate_val:.4f}")
+    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test AUC: {test_auc:.4f}, Test Loss: {test_loss:.4f}")
 
 
     if(epoch> 0 and epoch%10==0):
