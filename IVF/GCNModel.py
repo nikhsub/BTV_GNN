@@ -25,7 +25,7 @@ class EdgeMLPConv(MessagePassing):
         return self.mlp(torch.cat([x_i, x_j, edge_attr], dim=1))
 
 class GNNModel(torch.nn.Module):
-    def __init__(self, indim, outdim, edge_dim, heads=4, dropout=0.25):
+    def __init__(self, indim, outdim, edge_dim):
         super(GNNModel, self).__init__()
 
         self.bn0 = nn.BatchNorm1d(indim)
@@ -102,9 +102,5 @@ class GNNModel(torch.nn.Module):
 
         node_probs = self.node_pred(xf)
 
-        attn3 = None
-        attn2 = None
-        attn1 = None
-
-        return xf, node_probs, attn1, attn2, attn3
+        return xf, node_probs
 

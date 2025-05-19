@@ -36,7 +36,7 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 1024
+batchsize = 2048
 
 #LOADING DATA
 train_hads = []
@@ -67,8 +67,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features), heads=4, dropout=0.22)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -79,7 +79,7 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=2.7, alpha=0.96):
+def focal_loss(preds, labels, gamma=2.2, alpha=0.94):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
@@ -143,35 +143,6 @@ def contrastive_loss(x1, x2, temperature=0.5):
 
     return loss
 
-def sampled_contrastive_loss(x1, x2, temperature=0.5, num_negatives=32):
-    x1 = F.normalize(x1, dim=1)
-    x2 = F.normalize(x2, dim=1)
-
-    N = x1.size(0)
-    device = x1.device
-
-    loss = 0.0
-    for i in range(N):
-        anchor = x1[i].unsqueeze(0)  # [1, D]
-        positive = x2[i].unsqueeze(0)  # [1, D]
-
-        # Sample random negatives (excluding i)
-        neg_indices = torch.randperm(N, device=device)
-        neg_indices = neg_indices[neg_indices != i][:num_negatives]
-
-        negatives = x2[neg_indices]  # [num_negatives, D]
-
-        # Compute similarities
-        pos_sim = torch.matmul(anchor, positive.T) / temperature  # [1, 1]
-        neg_sim = torch.matmul(anchor, negatives.T) / temperature  # [1, num_negatives]
-
-        logits = torch.cat([pos_sim, neg_sim], dim=1)  # [1, 1 + num_negatives]
-        labels = torch.zeros(1, dtype=torch.long, device=device)  # positive is first entry
-
-        loss += F.cross_entropy(logits, labels)
-
-    return loss
-
 def drop_edges(edge_index, edge_attr, drop_percent):
     num_edges = edge_index.size(1)
     num_keep = int(num_edges * (1 - drop_percent))
@@ -211,7 +182,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
-        node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        node_embeds1, preds1 = model(data.x, data.edge_index, data.edge_attr)
         
         #edge_index2, edge_attr2 = drop_edges(data.edge_index, data.edge_attr, 0.5)
         #node_embeds2, _, _,_,_ = model(data.x, edge_index2, edge_attr2)
@@ -284,7 +255,7 @@ def test(model, test_loader, device, epoch, k=11, thres=0.5):
             
             #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, logits, _,_,_ = model(batch.x, batch.edge_index, batch.edge_attr)
+            _, logits = model(batch.x, batch.edge_index, batch.edge_attr)
             preds = torch.sigmoid(logits)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
@@ -338,7 +309,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
             try:
                 data = data.to(device)
                 #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-                _, logits, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+                _, logits = model(data.x, data.edge_index, data.edge_attr)
                 preds = torch.sigmoid(logits)
                 preds = preds.squeeze()
                 logits_cpu = logits.detach().cpu()

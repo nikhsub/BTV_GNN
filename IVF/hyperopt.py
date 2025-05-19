@@ -163,15 +163,13 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
 def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     # Hyperparameter suggestions
-    hidden_dim = trial.suggest_categorical("hidden_dim", [16, 32])
-    num_heads = trial.suggest_categorical("num_heads", [4,5,6])
-    dropout_rate = trial.suggest_uniform("dropout", 0.1, 0.25)
-    learning_rate = trial.suggest_loguniform("lr", 1e-6, 1e-3)
+    hidden_dim = trial.suggest_categorical("hidden_dim", [32, 48, 64, 96, 128])
+    learning_rate = trial.suggest_loguniform("lr", 1e-5, 1e-1)
     gamma = trial.suggest_uniform("gamma", 2.0, 3.0)
     alpha = trial.suggest_uniform("alpha", 0.90, 0.99)
 
     # Initialize model, optimizer, and loss function
-    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=len(edge_features), heads=num_heads, dropout=dropout_rate).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=len(edge_features), heads=4, dropout=0.2).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     best_metric = 0
@@ -180,9 +178,9 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     for epoch in range(30):  # Early stopping after 20 epochs
         print("EPOCH", epoch+1)
         train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, alpha, gamma)
-        _,_,_,prec, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
+        _,prauc,_,_, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
 
-        metric = prec
+        metric = prauc
 
         if metric > best_metric:
             best_metric = metric
@@ -190,8 +188,6 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
 
             best_trial_params = {
                 "hidden_dim": hidden_dim,
-                "num_heads": num_heads,
-                "dropout_rate": dropout_rate,
                 "learning_rate": learning_rate,
                 "bg_rej": bg_rej,
                 "metric": metric
@@ -265,7 +261,7 @@ if __name__ == "__main__":
 
     print(f"Best hyperparameters saved")
     
-    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=len(edge_features), heads=study.best_params["num_heads"], dropout=study.best_params["dropout"]).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=len(edge_features), heads=4, dropout=0.2).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["lr"])
 
     best_metric = 0.0  # Track the best validation AUC
