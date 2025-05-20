@@ -47,7 +47,7 @@ if args.load_train != "":
         with open(pkl_file, 'rb') as f:
             train_hads.extend(pickle.load(f))
 
-train_hads = train_hads[:10000] #Control number of input samples here - see array splicing for more
+train_hads = train_hads[:100000] #Control number of input samples here - see array splicing for more
 
 train_len = int(0.8 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])

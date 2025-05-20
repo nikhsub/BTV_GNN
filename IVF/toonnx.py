@@ -12,7 +12,7 @@ args = parser.parse_args()
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-model = GNNModel(indim=len(trk_features), outdim=96, edge_dim=len(edge_features))
+model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features))
 model.load_state_dict(torch.load(args.load_model, map_location=torch.device('cpu')))
 model.eval()
 

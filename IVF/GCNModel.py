@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import softmax
+from torch_scatter import scatter_add
 
 # ----------- Custom Edge-aware Conv Layer -------------
 class EdgeMLPConv(MessagePassing):
@@ -92,10 +93,9 @@ class GNNModel(torch.nn.Module):
         xf = gate * self.proj_skip(x) + (1 - gate) * x2
 
         num_nodes = x.size(0)
-        edge_feats_sum = torch.zeros((num_nodes, edge_attr_enc.size(1)), device=x.device)
-        edge_feats_sum = edge_feats_sum.index_add(0, edge_index[1], edge_attr_enc)
-
-        deg = torch.bincount(edge_index[1], minlength=num_nodes).clamp(min=1).unsqueeze(1).float()
+        ones = torch.ones(edge_index.size(1), device=x.device)
+        deg = scatter_add(ones, edge_index[1], dim=0, dim_size=num_nodes).unsqueeze(1).clamp(min=1)
+        edge_feats_sum = scatter_add(edge_attr_enc, edge_index[1], dim=0, dim_size=num_nodes)        
         edge_feats_mean = edge_feats_sum / deg
 
         xf = torch.cat([xf, edge_feats_mean], dim=1)

@@ -16,7 +16,7 @@ from tqdm import tqdm
 import os
 import torch.nn.functional as F
 import math
-from conmodel import *
+from GCNModel import *
 import pprint
 import matplotlib.pyplot as plt
 import joblib
@@ -30,11 +30,11 @@ parser = argparse.ArgumentParser("GNN testing")
 parser.add_argument("-lt", "--load_train", default="", help="Load training data from a file")
 parser.add_argument("-lm",  "--load_model", default="", help="Load model file")
 parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
-parser.add_argument("-had", "--hadron", default=False, action="store_true", help="Testing on hadronic samples")
 
 args = parser.parse_args()
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
 if args.load_train != "":
     print(f"Loading testing data from {args.load_train}...")
@@ -42,18 +42,15 @@ if args.load_train != "":
         train_graphs = pickle.load(f)
 
 val_graphs = train_graphs[:]
-model = GNNModel(len(trk_features), 512)
-model.load_state_dict(torch.load(args.load_model))
-model.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model.to(device)
 
 def run_onnx_inference(onnx_model_path, inputs, session):
 
     # Prepare inputs as a dictionary
     ort_inputs = {
         session.get_inputs()[0].name: inputs[0].cpu().numpy(),
-        session.get_inputs()[1].name: inputs[1].cpu().numpy()
+        session.get_inputs()[1].name: inputs[1].cpu().numpy(),
+        session.get_inputs()[2].name: inputs[2].cpu().numpy()
     }
 
     # Run the model
@@ -62,7 +59,7 @@ def run_onnx_inference(onnx_model_path, inputs, session):
     # Convert ONNX output back to torch tensor
     return torch.tensor(ort_outs[1])
 
-session = ort.InferenceSession("model.onnx")
+session = ort.InferenceSession(args.load_model)
 
 all_preds = []
 all_labels = []
@@ -77,16 +74,13 @@ for i, data in enumerate(val_graphs):
 
         data = data.to(device)
 
-        # Preprocessing (scale features and generate edge index)
-        edge_index = knn_graph(data.x, k=5, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-
-        # Run PyTorch model
-        #_, preds_torch = model(data.x, edge_index)
-
         # Run ONNX model
-        preds_onnx = run_onnx_inference("model.onnx", (data.x, edge_index), session).to(device)
+        logits = run_onnx_inference(args.load_model, (data.x, data.edge_index, data.edge_attr), session).to(device)
 
-        preds = preds_onnx.squeeze().cpu().numpy()
+        preds = torch.sigmoid(logits)
+        preds = preds.squeeze()
+
+        preds = preds.cpu().numpy()
         siginds = data.siginds.cpu().numpy()
         svinds = data.svinds.cpu().numpy()
         ntrks = len(preds)
@@ -136,12 +130,10 @@ plt.scatter(sv_tpr_array, sv_fpr_array, color='blue', label=f'IVF TPR={sv_tpr:.2
 plt.xlabel('Signal Accuracy')
 plt.ylabel('Background Mistag')
 
-if (args.hadron): plt.title('ROC - Hadronic Events')
-elif (not args.hadron): plt.title('ROC - Leptonic Events')
+plt.title('ROC')
 plt.legend(loc='upper left')
 plt.yscale('log')  # Optional: Set y-axis to log scale if desired
 plt.grid()
 
-if (args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}hadevts.png")
-elif (not args.hadron): plt.savefig(f"ROC_{args.savetag}_{i+1}lepevts.png")
+plt.savefig(f"ROC_{args.savetag}_{i+1}evts.png")
 plt.close()

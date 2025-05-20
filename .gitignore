@@ -38,3 +38,4 @@ IVF/model_files
 IVF/__pycache__
 IVF/stats
 IVF/scaler
+IVF/mods_onnx
