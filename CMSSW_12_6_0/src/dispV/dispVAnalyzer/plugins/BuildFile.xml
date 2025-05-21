@@ -16,6 +16,8 @@
 <use name="SimTracker/TrackAssociation"/>
 <use name="HLTrigger/HLTcore"/>
 <use name="RecoVertex/VertexPrimitives"/>
+<use name="RecoVertex/ConfigurableVertexReco"/>
+<use name="RecoVertex/AdaptiveVertexFinder"/>
 <use name="TrackingTools/TransientTrack"/>
 <use name="TrackingTools/Records"/>
 <use name="TrackingTools/IPTools"/>

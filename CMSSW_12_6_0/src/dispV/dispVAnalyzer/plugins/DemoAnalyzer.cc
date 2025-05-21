@@ -35,7 +35,11 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
   	packedGenToken_(consumes<edm::View<pat::PackedGenParticle> >(iConfig.getParameter<edm::InputTag>("packed"))),
 	mergedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("merged"))),
 	TrackPtCut_(iConfig.getUntrackedParameter<double>("TrackPtCut")),
-	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo")))
+	TrackPredCut_(iConfig.getUntrackedParameter<double>("TrackPredCut")),
+	vtxconfig_(iConfig.getUntrackedParameter<edm::ParameterSet>("vertexfitter")),
+        vtxmaker_(vtxconfig_),
+	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
+	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight"))
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -123,6 +127,16 @@ bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const st
     return false; // No D hadron found in the decay chain
 }
 
+bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
+
+   reco::Vertex tmpvtx(tVTX);
+   return (tVTX.isValid() &&
+    !tmpvtx.isFake() &&
+    (tmpvtx.nTracks(vtxweight_)>1) &&
+    (tmpvtx.normalizedChi2()>0) &&
+    (tmpvtx.normalizedChi2()<10));
+}
+
 inline float DemoAnalyzer::sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
@@ -205,7 +219,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SVtrk_eta.clear();
   SVtrk_phi.clear();
 
-  preds.clear();
+  nSVs_reco.clear();
+  SV_x_reco.clear();
+  SV_y_reco.clear();
+  SV_z_reco.clear();
+  SV_chi2_reco.clear();
+
 
   Handle<PackedCandidateCollection> patcan;
   Handle<PackedCandidateCollection> losttracks;
@@ -503,11 +522,31 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    // Get logits from output[1]
    std::vector<float> logits_data = output[1];  // output[1] is "node_probs"
-   preds.reserve(logits_data.size());
+
+   std::vector<reco::TransientTrack> t_trks_SV;
    
    for (size_t i = 0; i < logits_data.size(); ++i) {
-       preds.push_back(sigmoid(logits_data[i]));
+       if(sigmoid(logits_data[i]) >= TrackPredCut_){
+           t_trks_SV.push_back(t_trks[i]);
+       }
    }
+   
+   std::vector<TransientVertex> vertices = vtxmaker_.vertices(t_trks_SV);
+   //for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
+   //    if(!isGoodVtx(*isv)) isv = vertices.erase(isv)-1;
+
+   //}
+
+   int nvtx=0;
+   for(size_t ivtx=0; ivtx<vertices.size(); ivtx++){
+   	reco::Vertex tmpvtx(vertices[ivtx]);
+        nvtx++;
+        SV_x_reco.push_back(tmpvtx.position().x());
+	SV_y_reco.push_back(tmpvtx.position().y());
+	SV_z_reco.push_back(tmpvtx.position().z());
+	SV_chi2_reco.push_back(tmpvtx.normalizedChi2()); 
+   }
+   nSVs_reco.push_back(nvtx);
 
    int nhads = 0;
    int ngv = 0;
@@ -710,7 +749,12 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("SVtrk_eta", &SVtrk_eta);
 	tree->Branch("SVtrk_phi", &SVtrk_phi);
 
-	tree->Branch("trackpreds", &preds);
+	tree->Branch("nSVs_reco", &nSVs_reco);
+        tree->Branch("SV_x_reco", &SV_x_reco);
+        tree->Branch("SV_y_reco", &SV_y_reco);
+        tree->Branch("SV_z_reco", &SV_z_reco);
+        tree->Branch("SV_chi2_reco", &SV_chi2_reco);
+
 }
 
 

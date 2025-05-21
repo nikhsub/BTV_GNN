@@ -26,12 +26,16 @@
 #include "DataFormats/Candidate/interface/Candidate.h"
 #include "DataFormats/Candidate/interface/VertexCompositePtrCandidate.h"
 #include "DataFormats/VertexReco/interface/Vertex.h"
+#include "DataFormats/VertexReco/interface/VertexFwd.h"
 #include "DataFormats/HepMCCandidate/interface/GenParticle.h"
 #include "DataFormats/JetReco/interface/PFJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
 #include "DataFormats/JetReco/interface/GenJet.h"
 #include "DataFormats/JetReco/interface/PFJetCollection.h"
 #include "DataFormats/Math/interface/deltaR.h"
+#include "RecoVertex/VertexPrimitives/interface/TransientVertex.h"
+#include "RecoVertex/ConfigurableVertexReco/interface/ConfigurableVertexFitter.h"
+#include "RecoVertex/ConfigurableVertexReco/interface/ConfigurableVertexReconstructor.h"
 
 //TFile Service
 
@@ -83,7 +87,9 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
       int checkPDG(int abs_pdg);
       bool hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds);
+      bool isGoodVtx(TransientVertex &);
       float sigmoid(float x);
+
 
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
@@ -95,12 +101,14 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       edm::EDGetTokenT<edm::View<reco::GenParticle> > prunedGenToken_;
       edm::EDGetTokenT<edm::View<pat::PackedGenParticle> > packedGenToken_;
       edm::EDGetTokenT<edm::View<reco::GenParticle> > mergedGenToken_;
+      double TrackPtCut_;
+      double TrackPredCut_;
+      edm::ParameterSet vtxconfig_;
+      ConfigurableVertexReconstructor vtxmaker_;
+      edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
+      double vtxweight_;
 
       TTree *tree;
-      double TrackPtCut_;
-
-      edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
-
       float nPU;
 
       std::vector<float> Hadron_pt;
@@ -167,8 +175,13 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SVtrk_pt;
       std::vector<float> SVtrk_eta;
       std::vector<float> SVtrk_phi; 
+
+      std::vector<int> nSVs_reco;
+      std::vector<float> SV_x_reco;
+      std::vector<float> SV_y_reco;
+      std::vector<float> SV_z_reco;
+      std::vector<float> SV_chi2_reco;
 	
-      std::vector<float> preds;
 
      
 };

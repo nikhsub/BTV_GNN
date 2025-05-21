@@ -45,11 +45,16 @@ secVertices = cms.untracked.InputTag('slimmedSecondaryVertices'),
 losttracks = cms.untracked.InputTag('lostTracks', '', "PAT"),
 TrackPtCut = cms.untracked.double(0.5),
 addPileupInfo = cms.untracked.InputTag('slimmedAddPileupInfo'),
+vtxweight = cms.untracked.double(0.5),
+vertexfitter = cms.untracked.PSet(
+         finder = cms.string('avr')
+     ),
+TrackPredCut = cms.untracked.double(0.46),
 model_path = cms.FileInPath("dispV/dispVAnalyzer/data/GCN_out48_ttbartrain_onnx_2105.onnx")
 )
 
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("output_onnx_fin.root"),
+        fileName = cms.string("output_onnx_vtx.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles+process.demo)
