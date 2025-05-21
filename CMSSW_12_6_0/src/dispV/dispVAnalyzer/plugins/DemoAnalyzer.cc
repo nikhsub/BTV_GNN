@@ -23,7 +23,7 @@
 #include <iostream>
 #include <omp.h>
 
-DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig):
+DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *cache):
 
 	theTTBToken(esConsumes(edm::ESInputTag("", "TransientTrackBuilder"))),
 	TrackCollT_ (consumes<pat::PackedCandidateCollection>(iConfig.getUntrackedParameter<edm::InputTag>("tracks"))),
@@ -44,6 +44,12 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig):
 
 DemoAnalyzer::~DemoAnalyzer() {
 }
+
+std::unique_ptr<ONNXRuntime> DemoAnalyzer::initializeGlobalCache(const edm::ParameterSet &iConfig) {
+    return std::make_unique<ONNXRuntime>(iConfig.getParameter<edm::FileInPath>("model_path").fullPath());
+}
+
+void DemoAnalyzer::globalEndJob(const ONNXRuntime *cache) {}
 
 std::optional<std::tuple<float, float, float>> DemoAnalyzer::isAncestor(const reco::Candidate* ancestor, const reco::Candidate* particle)
 {
@@ -115,6 +121,10 @@ bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const st
     }
 
     return false; // No D hadron found in the decay chain
+}
+
+inline float DemoAnalyzer::sigmoid(float x) {
+    return 1.0f / (1.0f + std::exp(-x));
 }
 
 
@@ -194,6 +204,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SVtrk_pt.clear();
   SVtrk_eta.clear();
   SVtrk_phi.clear();
+
+  preds.clear();
 
   Handle<PackedCandidateCollection> patcan;
   Handle<PackedCandidateCollection> losttracks;
@@ -410,6 +422,93 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    ntrks.push_back(ntrk);
 
+   std::vector<std::vector<float>> track_features;
+   std::vector<std::vector<float>> edge_features;
+   std::vector<int64_t> edge_i, edge_j;
+   
+   for(size_t i = 0; i < static_cast<size_t>(ntrk); ++i){
+       track_features.push_back({
+		trk_eta[i],
+		trk_phi[i],
+		trk_ip2d[i],
+		trk_ip3d[i],
+		trk_ip2dsig[i],
+		trk_ip3dsig[i],
+		trk_p[i],
+		trk_pt[i],
+		static_cast<float>(trk_nValid[i]),
+    		static_cast<float>(trk_nValidPixel[i]),
+    		static_cast<float>(trk_nValidStrip[i]),
+    		static_cast<float>(trk_charge[i])
+	});
+   } 
+   
+   for (size_t idx = 0; idx < trk_i.size(); ++idx) {
+       int i = trk_i[idx];
+       int j = trk_j[idx];
+       if (cptopv[idx] >= 50.0 || pair_mom[idx] >= 100.0) continue;
+
+       edge_i.push_back(i);
+       edge_j.push_back(j);
+       
+        edge_features.push_back({
+        dca[idx],
+        deltaR[idx],
+        dca_sig[idx],
+        cptopv[idx],
+        pvtoPCA_j[idx],
+        pvtoPCA_i[idx],
+        dotprod_j[idx],
+        dotprod_i[idx],
+        pair_mom[idx],
+        pair_invmass[idx]
+        }); 
+    }
+
+   std::vector<float> x_in_flat;
+   x_in_flat.reserve(track_features.size() * 12);
+   for (const auto& feat : track_features)
+       x_in_flat.insert(x_in_flat.end(), feat.begin(), feat.end());
+
+   std::vector<float> edge_index_flat_f;
+   edge_index_flat_f.reserve(edge_i.size() * 2);
+   for (size_t k = 0; k < edge_i.size(); ++k) {
+       edge_index_flat_f.push_back(static_cast<float>(edge_i[k]));
+       edge_index_flat_f.push_back(static_cast<float>(edge_j[k]));
+   }
+  
+   std::vector<float> edge_attr_flat;
+   edge_attr_flat.reserve(edge_features.size() * 10);
+   for (const auto& feat : edge_features)
+       edge_attr_flat.insert(edge_attr_flat.end(), feat.begin(), feat.end());
+
+      
+   // === 4. Set input names and feed data ===
+   std::vector<std::string> input_names_ = {"x_in", "edge_index", "edge_attr"};
+
+   std::vector<std::vector<int64_t>> input_shapes_ = {
+    {1, static_cast<int64_t>(track_features.size()), 12},        // x_in
+    {1, 2, static_cast<int64_t>(edge_i.size())},                // edge_index
+    {1, static_cast<int64_t>(edge_features.size()), 10}         // edge_attr
+   };
+      
+   std::vector<std::vector<float>> data_ = {
+    x_in_flat,
+    edge_index_flat_f,
+    edge_attr_flat
+   };
+
+   std::vector<std::vector<float>> output = globalCache()->run(input_names_, data_, input_shapes_);
+   
+
+   // Get logits from output[1]
+   std::vector<float> logits_data = output[1];  // output[1] is "node_probs"
+   preds.reserve(logits_data.size());
+   
+   for (size_t i = 0; i < logits_data.size(); ++i) {
+       preds.push_back(sigmoid(logits_data[i]));
+   }
+
    int nhads = 0;
    int ngv = 0;
    int ngv_b = 0;
@@ -544,7 +643,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 }
 
 // ------------ method called once each job just before starting event loop  ------------
-void DemoAnalyzer::beginJob() {
+void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("nPU", &nPU);
 	tree->Branch("nHadrons", &nHadrons);
 	tree->Branch("Hadron_pt", &Hadron_pt);
@@ -610,12 +709,14 @@ void DemoAnalyzer::beginJob() {
 	tree->Branch("SVtrk_pt", &SVtrk_pt);
 	tree->Branch("SVtrk_eta", &SVtrk_eta);
 	tree->Branch("SVtrk_phi", &SVtrk_phi);
+
+	tree->Branch("trackpreds", &preds);
 }
 
 
 // ------------ method called once each job just after ending the event loop  ------------
-void DemoAnalyzer::endJob() {
-}
+//void DemoAnalyzer::endJob() {
+//}
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
 void DemoAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {

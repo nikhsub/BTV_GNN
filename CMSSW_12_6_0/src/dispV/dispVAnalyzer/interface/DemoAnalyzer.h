@@ -11,7 +11,7 @@
 
 // user include files
 #include "FWCore/Framework/interface/Frameworkfwd.h"
-#include "FWCore/Framework/interface/one/EDAnalyzer.h"
+#include "FWCore/Framework/interface/stream/EDAnalyzer.h"
 
 #include "FWCore/Framework/interface/Event.h"
 #include "FWCore/Framework/interface/MakerMacros.h"
@@ -59,22 +59,31 @@
 #include "TrackingTools/IPTools/interface/IPTools.h"
 
 #include "DataFormats/GeometryCommonDetAlgo/interface/Measurement1D.h"
+
+//ONNX
+#include "PhysicsTools/ONNXRuntime/interface/ONNXRuntime.h"
 //
 // class declaration
 //
-class DemoAnalyzer : public edm::one::EDAnalyzer<> {
+using namespace cms::Ort;
+
+class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime>> {
    public:
-      explicit DemoAnalyzer (const edm::ParameterSet&);
+      explicit DemoAnalyzer (const edm::ParameterSet&, const ONNXRuntime *);
       ~DemoAnalyzer();
       static void fillDescriptions(edm::ConfigurationDescriptions& descriptions);
+      static std::unique_ptr<ONNXRuntime> initializeGlobalCache(const edm::ParameterSet &);
+      static void globalEndJob(const ONNXRuntime *);
       
    private:
-      virtual void beginJob() override;
+      //virtual void beginJob() override;
+      virtual void beginStream(edm::StreamID) override;
       virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
-      virtual void endJob() override;
+      //virtual void endJob() override;
       std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
       int checkPDG(int abs_pdg);
       bool hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds);
+      float sigmoid(float x);
 
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
@@ -158,7 +167,10 @@ class DemoAnalyzer : public edm::one::EDAnalyzer<> {
       std::vector<float> SVtrk_pt;
       std::vector<float> SVtrk_eta;
       std::vector<float> SVtrk_phi; 
+	
+      std::vector<float> preds;
 
+     
 };
 
 #endif // DemoAnalyzer_h

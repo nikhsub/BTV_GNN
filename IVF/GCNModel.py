@@ -73,34 +73,48 @@ class GNNModel(torch.nn.Module):
         )
 
     def forward(self, x_in, edge_index, edge_attr):
-        x = self.bn0(x_in)
-        edge_attr_enc = self.edge_encoder(edge_attr)
-        edge_weights = self.edge_classifier(edge_attr).view(-1, 1)
-        edge_attr_enc = edge_attr_enc * edge_weights
 
-        x1 = self.edge_mlpconv1(x, edge_index, edge_attr_enc)
-        x1 = self.bn1(x1)
-        x1 = F.leaky_relu(x1)
-        x1 = self.drop1(x1)
+        batch_size, num_nodes, _ = x_in.shape
+        xf_all, probs_all = [], []
 
-        x2 = self.edge_mlpconv2(x1, edge_index, edge_attr_enc)
-        x2 = self.bn2(x2)
-        x2 = F.relu(x2)
-        x2 = self.drop2(x2)
+        if edge_index.dtype == torch.float32:
+            edge_index = edge_index.long()
+        
+        for b in range(batch_size):
+            x = x_in[b]                          # [num_nodes, indim]
+            e_idx = edge_index[b]               # [2, num_edges]
+            e_attr = edge_attr[b]               # [num_edges, edge_dim]
 
-        gate = torch.sigmoid(self.gate_layer(self.proj_skip(x)))
-        self.last_gate = gate.detach()
-        xf = gate * self.proj_skip(x) + (1 - gate) * x2
+            x = self.bn0(x)
 
-        num_nodes = x.size(0)
-        ones = torch.ones(edge_index.size(1), device=x.device)
-        deg = scatter_add(ones, edge_index[1], dim=0, dim_size=num_nodes).unsqueeze(1).clamp(min=1)
-        edge_feats_sum = scatter_add(edge_attr_enc, edge_index[1], dim=0, dim_size=num_nodes)        
-        edge_feats_mean = edge_feats_sum / deg
+            e_attr_enc = self.edge_encoder(e_attr)
+            edge_weights = self.edge_classifier(e_attr).view(-1, 1)
+            e_attr_enc = e_attr_enc * edge_weights
 
-        xf = torch.cat([xf, edge_feats_mean], dim=1)
+            x1 = self.edge_mlpconv1(x, e_idx, e_attr_enc)
+            x1 = self.bn1(x1)
+            x1 = F.leaky_relu(x1)
+            x1 = self.drop1(x1)
 
-        node_probs = self.node_pred(xf)
+            x2 = self.edge_mlpconv2(x1, e_idx, e_attr_enc)
+            x2 = self.bn2(x2)
+            x2 = F.relu(x2)
+            x2 = self.drop2(x2)
 
-        return xf, node_probs
+            gate = torch.sigmoid(self.gate_layer(self.proj_skip(x)))
+            self.last_gate = gate.detach()
+            xf = gate * self.proj_skip(x) + (1 - gate) * x2
+
+            ones = torch.ones(e_idx.size(1), device=x.device)
+            deg = scatter_add(ones, e_idx[1], dim=0, dim_size=num_nodes).unsqueeze(1).clamp(min=1)
+            edge_feats_sum = scatter_add(e_attr_enc, e_idx[1], dim=0, dim_size=num_nodes)
+            edge_feats_mean = edge_feats_sum / deg
+
+            xf_combined = torch.cat([xf, edge_feats_mean], dim=1)
+            node_probs = self.node_pred(xf_combined)
+
+            xf_all.append(xf_combined)
+            probs_all.append(node_probs)
+
+        return torch.stack(xf_all), torch.stack(probs_all)
 

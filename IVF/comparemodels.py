@@ -75,7 +75,7 @@ def evaluate(graphs, model, device):
     for data in graphs:
         with torch.no_grad():
             data = data.to(device)
-            _, logits = model(data.x, data.edge_index, data.edge_attr)
+            _, logits = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
             preds = torch.sigmoid(logits)
             preds = preds.squeeze().cpu().numpy()
                 
@@ -107,11 +107,27 @@ def evaluate(graphs, model, device):
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
 
-    precision, recall, _ = precision_recall_curve(all_labels, all_preds)
+    precision, recall, thresholds = precision_recall_curve(all_labels, all_preds)
     pr_auc = average_precision_score(all_labels, all_preds)
 
-    fpr, tpr, _ = roc_curve(all_labels, all_preds)
+    target_recall = 0.72
+
+    # Find index where recall is closest to the target
+    idx = np.abs(recall - target_recall).argmin()
+    
+    # Threshold that gives closest recall to target
+    cut_value = thresholds[idx]
+    matched_precision = precision[idx]
+    matched_recall = recall[idx]
+    
+    # Report
+    print(f"Cut value for recall ≈ {target_recall:.2f}: {cut_value:.4f}")
+    print(f"Model precision at that cut: {matched_precision:.4f}")
+    print(f"Actual recall at that cut:   {matched_recall:.4f}")
+
+    fpr, tpr,_ = roc_curve(all_labels, all_preds)
     roc_auc = auc(fpr, tpr)
+
 
     sv_tpr = sv_tp / (sv_tp + sv_fn) if (sv_tp + sv_fn) > 0 else 0
     sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
@@ -147,8 +163,8 @@ p2, r2, auc2, fpr2, tpr2, roc_auc2, all_preds_XGB, all_labels_XGB = evaluate_xgb
 
 # Plot the ROC curves
 plt.figure(figsize=(10, 8))
-plt.plot(r1, p1, label=f"{args.tag1} (AUC = {auc1:.2f})", color="red")
-plt.plot(r2, p2, label=f"{args.tag2} (AUC = {auc2:.2f})", color="blue")
+plt.plot(r1, p1, label=f"{args.tag1} (AUC = {auc1:.4f})", color="red")
+plt.plot(r2, p2, label=f"{args.tag2} (AUC = {auc2:.4f})", color="blue")
 if(not args.hadron): plt.scatter([sv_r1], [sv_p1], color="black", label=f"IVF Recall={sv_r1:.2f}, Precision={sv_p1:.2f}", zorder=5)
 
 plt.xlabel("Recall(Signal Efficiency)")
@@ -161,8 +177,8 @@ plt.savefig(f"PR_modcompare_{args.savetag}.png")
 plt.close()
 
 plt.figure(figsize=(10, 8))
-plt.plot(tpr1, fpr1, label=f"{args.tag1} (AUC = {roc_auc1:.2f})", color="red")
-plt.plot(tpr2, fpr2, label=f"{args.tag2} (AUC = {roc_auc2:.2f})", color="blue")
+plt.plot(tpr1, fpr1, label=f"{args.tag1} (AUC = {roc_auc1:.4f})", color="red")
+plt.plot(tpr2, fpr2, label=f"{args.tag2} (AUC = {roc_auc2:.4f})", color="blue")
 if(not args.hadron): plt.scatter([sv_tpr1], [sv_fpr1], color="black", label=f"IVF TPR={sv_tpr1:.2f}, FPR={sv_fpr1:.2f}", zorder=5)
 
 plt.xlabel("Signal Efficiency")

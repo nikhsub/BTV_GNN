@@ -79,7 +79,7 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=2.2, alpha=0.94):
+def focal_loss(preds, labels, gamma=2.3, alpha=0.95):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
@@ -182,17 +182,17 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
-        node_embeds1, preds1 = model(data.x, data.edge_index, data.edge_attr)
+        node_embeds1, preds1 = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
         
         #edge_index2, edge_attr2 = drop_edges(data.edge_index, data.edge_attr, 0.5)
-        #node_embeds2, _, _,_,_ = model(data.x, edge_index2, edge_attr2)
+        #node_embeds2, _, _,_,_ = model(.unsqueeze(0)data.x, edge_index2, edge_attr2)
         
         #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
         #loss_fn = torch.nn.BCEWithLogitsLoss()
         #node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
         
         #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
-        node_loss = focal_loss(preds1, data.y.float().unsqueeze(1))
+        node_loss = focal_loss(preds1.squeeze(0), data.y.float().unsqueeze(1))
 
         #del preds1, edge_index2, edge_attr2   # Helps free memory from large prediction tensor
         #torch.cuda.empty_cache()
@@ -255,8 +255,8 @@ def test(model, test_loader, device, epoch, k=11, thres=0.5):
             
             #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, logits = model(batch.x, batch.edge_index, batch.edge_attr)
-            preds = torch.sigmoid(logits)
+            _, logits = model(batch.x.unsqueeze(0), batch.edge_index.unsqueeze(0), batch.edge_attr.unsqueeze(0))
+            preds = torch.sigmoid(logits).squeeze(0)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
             all_labels.extend(batch.y.cpu().numpy())
@@ -309,8 +309,8 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
             try:
                 data = data.to(device)
                 #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-                _, logits = model(data.x, data.edge_index, data.edge_attr)
-                preds = torch.sigmoid(logits)
+                _, logits = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
+                preds = torch.sigmoid(logits).squeeze(0)
                 preds = preds.squeeze()
                 logits_cpu = logits.detach().cpu()
                 preds_cpu = preds.detach().cpu()
