@@ -36,6 +36,16 @@
 #include "RecoVertex/VertexPrimitives/interface/TransientVertex.h"
 #include "RecoVertex/ConfigurableVertexReco/interface/ConfigurableVertexFitter.h"
 #include "RecoVertex/ConfigurableVertexReco/interface/ConfigurableVertexReconstructor.h"
+#include "RecoVertex/AdaptiveVertexFinder/interface/TracksClusteringFromDisplacedSeed.h"
+#include "RecoVertex/AdaptiveVertexFinder/interface/VertexMerging.h"
+#include "RecoVertex/AdaptiveVertexFit/interface/AdaptiveVertexFitter.h"
+#include "RecoVertex/VertexTools/interface/SharedTracks.h"
+#include "RecoVertex/VertexPrimitives/interface/VertexState.h"
+#include "RecoVertex/VertexPrimitives/interface/ConvertToFromReco.h"
+#include "RecoVertex/AdaptiveVertexFit/interface/AdaptiveVertexFitter.h"
+#include "RecoVertex/KalmanVertexFit/interface/KalmanVertexUpdator.h"
+#include "RecoVertex/KalmanVertexFit/interface/KalmanVertexTrackCompatibilityEstimator.h"
+#include "RecoVertex/KalmanVertexFit/interface/KalmanVertexSmoother.h"
 
 //TFile Service
 
@@ -88,6 +98,8 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       int checkPDG(int abs_pdg);
       bool hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds);
       bool isGoodVtx(TransientVertex &);
+      std::vector<TransientVertex> TrackVertexRefit(std::vector<reco::TransientTrack> &, std::vector<TransientVertex> &);
+      void vertexMerge(std::vector<TransientVertex> &, double, double );
       float sigmoid(float x);
 
 
@@ -107,6 +119,7 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       ConfigurableVertexReconstructor vtxmaker_;
       edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
       double vtxweight_;
+      std::unique_ptr<TracksClusteringFromDisplacedSeed> clusterizer;
 
       TTree *tree;
       float nPU;
@@ -175,6 +188,8 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SVtrk_pt;
       std::vector<float> SVtrk_eta;
       std::vector<float> SVtrk_phi; 
+      
+       std::vector<float> preds;
 
       std::vector<int> nSVs_reco;
       std::vector<float> SV_x_reco;

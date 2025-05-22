@@ -68,7 +68,7 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features))
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01) #Was 0.00005
+optimizer = torch.optim.Adam(model.parameters(), lr=0.008) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -79,7 +79,7 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=2.3, alpha=0.95):
+def focal_loss(preds, labels, gamma=2.2, alpha=0.93):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
@@ -139,6 +139,7 @@ def contrastive_loss(x1, x2, temperature=0.5):
     similarity_matrix = torch.mm(x1, x2.t()) / temperature
 
     labels = torch.arange(batch_size).to(x1.device)
+
     loss = F.cross_entropy(similarity_matrix, labels)
 
     return loss

@@ -16,6 +16,19 @@ process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
 process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(10000))
 
+ClusteringParam = cms.PSet(
+          seedMax3DIPSignificance =  cms.double(9999.0),
+          seedMax3DIPValue =  cms.double(9999.0),
+          seedMin3DIPSignificance = cms.double(1.2),
+          seedMin3DIPValue = cms.double(0.005),
+          clusterMaxDistance = cms.double(2.0),
+          clusterMaxSignificance = cms.double(10.0),
+          distanceRatio = cms.double(10.0),
+          clusterMinAngleCosine = cms.double(0.0),
+          maxTimeSignificance = cms.double(3.5),
+)
+
+
 process.source = cms.Source("PoolSource",
     #fileNames = cms.untracked.vstring("root://cms-xrd-global.cern.ch//store/mc/RunIISummer20UL18MiniAODv2/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/MINIAODSIM/106X_upgrade2018_realistic_v16_L1v1-v1/00000/04A0B676-D63A-6D41-B47F-F4CF8CBE7DB8.root") #Training
     fileNames = cms.untracked.vstring("root://cms-xrd-global.cern.ch//store/mc/RunIISummer20UL18MiniAODv2/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/MINIAODSIM/106X_upgrade2018_realistic_v16_L1v1-v1/00000/0C6623EF-B101-694A-8904-D7578B1093C8.root") #Testing
@@ -50,7 +63,8 @@ vertexfitter = cms.untracked.PSet(
          finder = cms.string('avr')
      ),
 TrackPredCut = cms.untracked.double(0.46),
-model_path = cms.FileInPath("dispV/dispVAnalyzer/data/GCN_out48_ttbartrain_onnx_2105.onnx")
+clusterizer = ClusteringParam,
+model_path = cms.FileInPath("dispV/dispVAnalyzer/data/GCN_opt48_ttbartrain_onnx_2205.onnx")
 )
 
 process.TFileService = cms.Service("TFileService",

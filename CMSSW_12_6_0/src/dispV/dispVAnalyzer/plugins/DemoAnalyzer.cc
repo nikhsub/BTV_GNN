@@ -39,7 +39,8 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
 	vtxconfig_(iConfig.getUntrackedParameter<edm::ParameterSet>("vertexfitter")),
         vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
-	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight"))
+	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
+	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -137,6 +138,78 @@ bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
     (tmpvtx.normalizedChi2()<10));
 }
 
+std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::TransientTrack> &Tracks, std::vector<TransientVertex> &VTXs){
+    AdaptiveVertexFitter theAVF(GeometricAnnealing(3, 256, 0.25),
+				DefaultLinearizationPointFinder(),
+                                         KalmanVertexUpdator<5>(),
+                                         KalmanVertexTrackCompatibilityEstimator<5>(),
+                                         KalmanVertexSmoother());
+ 
+  std::vector<TransientVertex> newVTXs;
+
+  for(std::vector<TransientVertex>::const_iterator sv = VTXs.begin(); sv != VTXs.end(); ++sv){
+      GlobalPoint ssv = sv->position();
+      reco::Vertex tmpvtx = reco::Vertex(*sv);
+      std::vector<reco::TransientTrack> selTrks; 
+      for(std::vector<reco::TransientTrack>::const_iterator trk = Tracks.begin(); trk!=Tracks.end(); ++trk){
+	  if (trk->track().pt() <= 0 || !trk->track().charge()) continue;
+          Measurement1D ip3d = IPTools::absoluteImpactParameter3D(*trk, tmpvtx).second;
+          if(ip3d.significance()<5.0 || sv->trackWeight(*trk)>0.5){
+              selTrks.push_back(*trk);
+          }
+      }
+      
+      if(selTrks.size()>=2){
+          TransientVertex newsv = theAVF.vertex(selTrks, ssv);
+          if(isGoodVtx(newsv)) newVTXs.push_back(newsv);
+      }
+  
+  }
+  return newVTXs;
+}
+
+void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFraction, double minSignificance) {
+    VertexDistance3D dist;
+    std::vector<TransientVertex> cleaned;
+
+    for (size_t i = 0; i < VTXs.size(); ++i) {
+        bool shared = false;
+        VertexState s1 = VTXs[i].vertexState();
+
+        for (size_t j = 0; j < VTXs.size(); ++j) {
+            if (i == j) continue;
+
+            VertexState s2 = VTXs[j].vertexState();
+
+            // Check before constructing reco::Vertex
+            if (!VTXs[i].isValid() || !VTXs[j].isValid()) continue;
+
+            const reco::Vertex& vtx_i = reco::Vertex(VTXs[i]);
+            const reco::Vertex& vtx_j = reco::Vertex(VTXs[j]);
+
+            double fr = vertexTools::computeSharedTracks(vtx_j, vtx_i);
+            double dist_sig = dist.distance(s1, s2).significance();
+	
+	    std::cout << "Vertex " << i << " vs Vertex " << j
+                      << " | SharedFrac: " << fr
+                      << " | DistanceSig: " << dist_sig << std::endl;
+
+
+            if (fr > maxFraction && dist_sig < minSignificance) {
+                shared = true;
+                break;
+            }
+        }
+
+        if (!shared) {
+            cleaned.push_back(VTXs[i]);
+        }
+    }
+
+    VTXs = cleaned;  // Replace with cleaned list
+}
+
+
 inline float DemoAnalyzer::sigmoid(float x) {
     return 1.0f / (1.0f + std::exp(-x));
 }
@@ -218,6 +291,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SVtrk_pt.clear();
   SVtrk_eta.clear();
   SVtrk_phi.clear();
+
+  preds.clear();
 
   nSVs_reco.clear();
   SV_x_reco.clear();
@@ -526,10 +601,32 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<reco::TransientTrack> t_trks_SV;
    
    for (size_t i = 0; i < logits_data.size(); ++i) {
+       preds.push_back(sigmoid(logits_data[i]));
        if(sigmoid(logits_data[i]) >= TrackPredCut_){
            t_trks_SV.push_back(t_trks[i]);
        }
    }
+
+   std::cout << "t_trks_SV size"<< t_trks_SV.size() << std::endl;
+
+   std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
+   std::vector<TransientVertex> recoVertices;
+   for (std::vector<TracksClusteringFromDisplacedSeed::Cluster>::iterator cluster = clusters.begin(); cluster != clusters.end(); ++cluster) {
+          if (cluster->tracks.size()<2) continue; 
+          
+          std::vector<TransientVertex> tmp_vertices = vtxmaker_.vertices(cluster->tracks);
+          for (std::vector<TransientVertex>::iterator v = tmp_vertices.begin(); v != tmp_vertices.end(); ++v) {
+           reco::Vertex tmpvtx(*v);
+           if(v->isValid() &&
+              !tmpvtx.isFake() &&
+              (tmpvtx.nTracks(vtxweight_)>1) &&
+              (tmpvtx.normalizedChi2()>0) &&
+              (tmpvtx.normalizedChi2()<10)) recoVertices.push_back(*v); 
+
+          }
+    }
+
+    //std::cout << "Recovertices size" << recoVertices.size() << std::endl;
    
    std::vector<TransientVertex> vertices = vtxmaker_.vertices(t_trks_SV);
    //for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
@@ -537,14 +634,27 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    //}
 
+   std::cout << "vertices size" << vertices.size() << std::endl;
+
+   recoVertices.insert(recoVertices.end(), vertices.begin(), vertices.end());
+
+   std::cout << "Recovertices size" << recoVertices.size() << std::endl;
+	
+
+   std::vector<TransientVertex> newVTXs = recoVertices;
+   //std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
+   std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+   //vertexMerge(newVTXs, 0.2, 3.0);
+   //std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+
    int nvtx=0;
-   for(size_t ivtx=0; ivtx<vertices.size(); ivtx++){
-   	reco::Vertex tmpvtx(vertices[ivtx]);
+   for(size_t ivtx=0; ivtx<newVTXs.size(); ivtx++){
+   	reco::Vertex tmpvtx(newVTXs[ivtx]);
         nvtx++;
         SV_x_reco.push_back(tmpvtx.position().x());
-	SV_y_reco.push_back(tmpvtx.position().y());
-	SV_z_reco.push_back(tmpvtx.position().z());
-	SV_chi2_reco.push_back(tmpvtx.normalizedChi2()); 
+        SV_y_reco.push_back(tmpvtx.position().y());
+        SV_z_reco.push_back(tmpvtx.position().z());
+        SV_chi2_reco.push_back(tmpvtx.normalizedChi2()); 
    }
    nSVs_reco.push_back(nvtx);
 
@@ -748,6 +858,8 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("SVtrk_pt", &SVtrk_pt);
 	tree->Branch("SVtrk_eta", &SVtrk_eta);
 	tree->Branch("SVtrk_phi", &SVtrk_phi);
+        
+        tree->Branch("preds", &preds);
 
 	tree->Branch("nSVs_reco", &nSVs_reco);
         tree->Branch("SV_x_reco", &SV_x_reco);
@@ -768,8 +880,7 @@ void DemoAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
   desc.setUnknown();
-  descriptions.addDefault(desc);
-
+  descriptions.addDefault( desc);
   //Specify that only 'tracks' is allowed
   //To use, remove the default given above and uncomment below
   //ParameterSetDescription desc;
