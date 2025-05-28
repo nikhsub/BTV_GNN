@@ -140,19 +140,21 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
 
     if (int(args.end) == -1): end = num_evts
     else: end = int(args.end)
+    
+    dummy_values = np.array([-999.0] * 8 + [-1.0] * 3 + [-3.0], dtype=np.float32)  # Customize per feature
 
     for evt in range(int(args.start), end):
         print(evt)
         evt_features = {f: trk_data[f][evt] for f in trk_features}
         fullfeatmat = np.stack([evt_features[f] for f in trk_features], axis=1)
         fullfeatmat = np.array(fullfeatmat, dtype=np.float32)
-    
-        nan_mask = ~np.isnan(fullfeatmat).any(axis=1)
-        fullfeatmat = fullfeatmat[nan_mask]
-        valid_indices = np.where(nan_mask)[0]
         
-        val_inds_map = {ind: i for i, ind in enumerate(valid_indices)}
+        mask = ~np.isfinite(fullfeatmat)
+        fullfeatmat[mask] = np.broadcast_to(dummy_values, fullfeatmat.shape)[mask]
 
+        valid_indices = np.arange(len(fullfeatmat))
+        val_inds_map = {ind: ind for ind in valid_indices}  # Identity map
+    
         evtsiginds = list(set(sig_ind_array[evt]))
 
         trk_1 = trk_1_array[evt]
@@ -202,7 +204,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
             bkginds=torch.tensor(evtbkginds, dtype=torch.int16),
             svinds=torch.tensor(evtsvinds, dtype=torch.int16),
-            edge_index=torch.tensor(edge_index, dtype=torch.int64),
+            edge_index=torch.tensor(edge_index, dtype=torch.float),
             edge_attr=torch.tensor(edge_features, dtype=torch.float) 
         )
         print("X", fullfeatmat.shape)

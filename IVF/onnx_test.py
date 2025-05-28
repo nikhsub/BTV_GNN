@@ -67,6 +67,7 @@ sv_tp = 0
 sv_fp = 0
 sv_tn = 0
 sv_fn = 0
+num_trks = 0
 for i, data in enumerate(val_graphs):
     with torch.no_grad():
 
@@ -75,7 +76,7 @@ for i, data in enumerate(val_graphs):
         data = data.to(device)
 
         # Run ONNX model
-        logits = run_onnx_inference(args.load_model, (data.x, data.edge_index, data.edge_attr), session).to(device)
+        logits = run_onnx_inference(args.load_model, (data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0)), session).to(device)
 
         preds = torch.sigmoid(logits)
         preds = preds.squeeze()
@@ -84,6 +85,8 @@ for i, data in enumerate(val_graphs):
         siginds = data.siginds.cpu().numpy()
         svinds = data.svinds.cpu().numpy()
         ntrks = len(preds)
+
+        num_trks+=ntrks
 
         labels = np.zeros(len(preds))
         labels[siginds] = 1
@@ -124,8 +127,8 @@ roc_auc = auc(fpr, tpr)
 
 # Plot the ROC curve
 plt.figure(figsize=(8, 6))
-plt.plot(tpr, fpr, color='darkorange', label=f'GNN model (AUC = {roc_auc:.2f})')
-plt.scatter(sv_tpr_array, sv_fpr_array, color='blue', label=f'IVF TPR={sv_tpr:.2f}, FPR={sv_fpr:.2f}', zorder=5)
+plt.plot(tpr, fpr, color='darkorange', label=f'GNN model (AUC = {roc_auc:.4f})')
+plt.scatter(sv_tpr_array, sv_fpr_array, color='blue', label=f'IVF TPR={sv_tpr:.4f}, FPR={sv_fpr:.4f}', zorder=5)
 
 plt.xlabel('Signal Accuracy')
 plt.ylabel('Background Mistag')
@@ -137,3 +140,5 @@ plt.grid()
 
 plt.savefig(f"ROC_{args.savetag}_{i+1}evts.png")
 plt.close()
+
+print("Total number of tracks", num_trks)

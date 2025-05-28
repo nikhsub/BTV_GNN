@@ -14,7 +14,7 @@ process.load('RecoTracker.Configuration.RecoTracker_cff')
 #process.load('Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff')
 process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(10000))
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3000))
 
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
@@ -62,13 +62,13 @@ vtxweight = cms.untracked.double(0.5),
 vertexfitter = cms.untracked.PSet(
          finder = cms.string('avr')
      ),
-TrackPredCut = cms.untracked.double(0.46),
+TrackPredCut = cms.untracked.double(0.10),
 clusterizer = ClusteringParam,
 model_path = cms.FileInPath("dispV/dispVAnalyzer/data/GCN_opt48_ttbartrain_onnx_2205.onnx")
 )
 
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("output_onnx_vtx.root"),
+        fileName = cms.string("output_onnx_top10per.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles+process.demo)

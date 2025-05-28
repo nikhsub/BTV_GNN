@@ -45,6 +45,7 @@ def evaluate_xgb(graphs, model):
 
     for data in graphs:
         preds = model.predict_proba(data.x)[:,1]  # Assuming data.x contains the features
+        preds = np.nan_to_num(preds, nan=0.0)
     
         if(not args.hadron):
             siginds = data.siginds.cpu().numpy()
@@ -78,6 +79,7 @@ def evaluate(graphs, model, device):
             _, logits = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
             preds = torch.sigmoid(logits)
             preds = preds.squeeze().cpu().numpy()
+            preds = np.nan_to_num(preds, nan=0.0)
                 
             if(not args.hadron):
                 siginds = data.siginds.cpu().numpy()
@@ -211,8 +213,8 @@ fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
 bins = 50
 
 # GNN subplot
-axs[0].hist(gnn_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
-axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
+axs[0].hist(gnn_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=True)
+axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=True)
 axs[0].set_yscale('log')
 axs[0].set_title("GNN Prediction Scores")
 axs[0].set_xlabel("Prediction Score")
@@ -221,8 +223,8 @@ axs[0].legend()
 axs[0].grid(True)
 
 # XGB subplot
-axs[1].hist(xgb_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
-axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
+axs[1].hist(xgb_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=True)
+axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=True)
 axs[1].set_yscale('log')
 axs[1].set_title("XGBoost Prediction Scores")
 axs[1].set_xlabel("Prediction Score")

@@ -8,6 +8,7 @@
 #include <limits>
 #include <cmath>
 #include <algorithm>
+#include <utility>
 
 // user include files
 #include "FWCore/Framework/interface/Frameworkfwd.h"
@@ -189,7 +190,8 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SVtrk_eta;
       std::vector<float> SVtrk_phi; 
       
-       std::vector<float> preds;
+      std::vector<float> preds;
+      std::vector<float> cut;
 
       std::vector<int> nSVs_reco;
       std::vector<float> SV_x_reco;

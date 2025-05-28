@@ -22,6 +22,7 @@
 #include "dispV/dispVAnalyzer/interface/DemoAnalyzer.h"
 #include <iostream>
 #include <omp.h>
+#include <unordered_set>
 
 DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *cache):
 
@@ -173,29 +174,37 @@ void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFra
     std::vector<TransientVertex> cleaned;
 
     for (size_t i = 0; i < VTXs.size(); ++i) {
+        if (!VTXs[i].isValid()) continue;
+
         bool shared = false;
         VertexState s1 = VTXs[i].vertexState();
 
         for (size_t j = 0; j < VTXs.size(); ++j) {
-            if (i == j) continue;
+            if (i == j || !VTXs[j].isValid()) continue;
 
             VertexState s2 = VTXs[j].vertexState();
 
-            // Check before constructing reco::Vertex
-            if (!VTXs[i].isValid() || !VTXs[j].isValid()) continue;
+            // Custom shared fraction calculation (via momentum comparison)
+            int sharedTracks = 0;
+            const auto& tracks_i = VTXs[i].originalTracks();
+            const auto& tracks_j = VTXs[j].originalTracks();
 
-            const reco::Vertex& vtx_i = reco::Vertex(VTXs[i]);
-            const reco::Vertex& vtx_j = reco::Vertex(VTXs[j]);
+            for (const auto& ti : tracks_i) {
+                for (const auto& tj : tracks_j) {
+                    double dpt = std::abs(ti.track().pt() - tj.track().pt());
+                    if (dpt < 1e-3) {
+                        ++sharedTracks;
+                        break;
+                    }
+                }
+            }
 
-            double fr = vertexTools::computeSharedTracks(vtx_j, vtx_i);
+            double sharedFrac = double(sharedTracks) / std::min(tracks_i.size(), tracks_j.size());
+
             double dist_sig = dist.distance(s1, s2).significance();
-	
-	    std::cout << "Vertex " << i << " vs Vertex " << j
-                      << " | SharedFrac: " << fr
-                      << " | DistanceSig: " << dist_sig << std::endl;
 
 
-            if (fr > maxFraction && dist_sig < minSignificance) {
+            if (sharedFrac > maxFraction && dist_sig < minSignificance) {
                 shared = true;
                 break;
             }
@@ -206,12 +215,21 @@ void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFra
         }
     }
 
-    VTXs = cleaned;  // Replace with cleaned list
+    VTXs = cleaned;
 }
 
 
+
+
 inline float DemoAnalyzer::sigmoid(float x) {
-    return 1.0f / (1.0f + std::exp(-x));
+    if (std::isnan(x)) return 0.0f;  // handle NaN safely
+    if (x >= 0.0f) {
+        float z = std::exp(-x);
+        return 1.0f / (1.0f + z);
+    } else {
+        float z = std::exp(x);
+        return z / (1.0f + z);
+    }
 }
 
 
@@ -293,6 +311,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SVtrk_phi.clear();
 
   preds.clear();
+  cut.clear();
 
   nSVs_reco.clear();
   SV_x_reco.clear();
@@ -519,28 +538,50 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<std::vector<float>> track_features;
    std::vector<std::vector<float>> edge_features;
    std::vector<int64_t> edge_i, edge_j;
+
+   // Container to remember which tracks have bad features
+   std::unordered_set<int> bad_track_indices;
    
-   for(size_t i = 0; i < static_cast<size_t>(ntrk); ++i){
-       track_features.push_back({
-		trk_eta[i],
-		trk_phi[i],
-		trk_ip2d[i],
-		trk_ip3d[i],
-		trk_ip2dsig[i],
-		trk_ip3dsig[i],
-		trk_p[i],
-		trk_pt[i],
-		static_cast<float>(trk_nValid[i]),
-    		static_cast<float>(trk_nValidPixel[i]),
-    		static_cast<float>(trk_nValidStrip[i]),
-    		static_cast<float>(trk_charge[i])
-	});
-   } 
+   // Step 1: Build track_features, and track bad ones
+   for (size_t i = 0; i < static_cast<size_t>(ntrk); ++i) {
+       std::vector<float> features = {
+           trk_eta[i],
+           trk_phi[i],
+           trk_ip2d[i],
+           trk_ip3d[i],
+           trk_ip2dsig[i],
+           trk_ip3dsig[i],
+           trk_p[i],
+           trk_pt[i],
+           static_cast<float>(trk_nValid[i]),
+           static_cast<float>(trk_nValidPixel[i]),
+           static_cast<float>(trk_nValidStrip[i]),
+           static_cast<float>(trk_charge[i])
+       };
+   
+       bool has_nan = false;
+       for (float val : features) {
+           if (!std::isfinite(val)) {
+               has_nan = true;
+               break;
+           }
+       }
+   
+       if (has_nan) {
+           bad_track_indices.insert(i);
+       }
+   
+       track_features.push_back(features);
+   }
+
+    
    
    for (size_t idx = 0; idx < trk_i.size(); ++idx) {
        int i = trk_i[idx];
        int j = trk_j[idx];
-       if (cptopv[idx] >= 50.0 || pair_mom[idx] >= 100.0) continue;
+
+       if (bad_track_indices.count(i) || bad_track_indices.count(j)) continue;
+       if (cptopv[idx] >= 100.0 || pair_mom[idx] >= 100.0) continue;
 
        edge_i.push_back(i);
        edge_j.push_back(j);
@@ -599,13 +640,33 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<float> logits_data = output[1];  // output[1] is "node_probs"
 
    std::vector<reco::TransientTrack> t_trks_SV;
-   
+
+   std::vector<std::pair<float, size_t>> score_index_pairs;
    for (size_t i = 0; i < logits_data.size(); ++i) {
-       preds.push_back(sigmoid(logits_data[i]));
-       if(sigmoid(logits_data[i]) >= TrackPredCut_){
-           t_trks_SV.push_back(t_trks[i]);
+       float raw_score = sigmoid(logits_data[i]);
+       if (std::isnan(raw_score)) {
+           std::cerr << "Warning: NaN in sigmoid at index " << i << ", setting to 0.0\n";
        }
+       float score = std::isnan(raw_score) ? 0.0f : raw_score;
+       preds.push_back(score);
+       score_index_pairs.emplace_back(score, i);  // (score, index)
    }
+   
+   // Step 2: Sort by descending score
+   std::sort(score_index_pairs.begin(), score_index_pairs.end(),
+             [](const auto& a, const auto& b) { return a.first > b.first; });
+   
+   // Step 3: Keep top 5%
+   size_t n_keep = std::max<size_t>(1, score_index_pairs.size() * TrackPredCut_);  // ensure at least one
+   for (size_t k = 0; k < n_keep; ++k) {
+       size_t idx = score_index_pairs[k].second;
+       t_trks_SV.push_back(t_trks[idx]);
+   }
+
+   float event_cut_threshold = score_index_pairs[n_keep - 1].first;
+   cut.push_back(event_cut_threshold);
+   
+   
 
    std::cout << "t_trks_SV size"<< t_trks_SV.size() << std::endl;
 
@@ -621,7 +682,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
               !tmpvtx.isFake() &&
               (tmpvtx.nTracks(vtxweight_)>1) &&
               (tmpvtx.normalizedChi2()>0) &&
-              (tmpvtx.normalizedChi2()<10)) recoVertices.push_back(*v); 
+              (tmpvtx.normalizedChi2()<5)) recoVertices.push_back(*v); 
 
           }
     }
@@ -629,10 +690,10 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     //std::cout << "Recovertices size" << recoVertices.size() << std::endl;
    
    std::vector<TransientVertex> vertices = vtxmaker_.vertices(t_trks_SV);
-   //for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
-   //    if(!isGoodVtx(*isv)) isv = vertices.erase(isv)-1;
+   for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
+       if(!isGoodVtx(*isv)) isv = vertices.erase(isv)-1;
 
-   //}
+   }
 
    std::cout << "vertices size" << vertices.size() << std::endl;
 
@@ -641,11 +702,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::cout << "Recovertices size" << recoVertices.size() << std::endl;
 	
 
-   std::vector<TransientVertex> newVTXs = recoVertices;
-   //std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
+   //std::vector<TransientVertex> newVTXs = recoVertices;
+   std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
-   //vertexMerge(newVTXs, 0.2, 3.0);
-   //std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+   vertexMerge(newVTXs, 0.3, 3.0);
+   std::cout << "newVTXs size" << newVTXs.size() << std::endl;
 
    int nvtx=0;
    for(size_t ivtx=0; ivtx<newVTXs.size(); ivtx++){
@@ -860,6 +921,7 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("SVtrk_phi", &SVtrk_phi);
         
         tree->Branch("preds", &preds);
+	tree->Branch("cut_val", &cut);
 
 	tree->Branch("nSVs_reco", &nSVs_reco);
         tree->Branch("SV_x_reco", &SV_x_reco);

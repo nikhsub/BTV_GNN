@@ -75,6 +75,7 @@ dotprod_1       = std.vector('double')()
 dotprod_2       = std.vector('double')()
 pair_mom        = std.vector('double')()
 pair_invmass    = std.vector('double')()
+preds           = std.vector('double')()
 
 branches = {
     "had_pt": had_pt, "sig_flag": sig_flag, "sig_flav": sig_flav, "sig_ind": sig_ind, "bkg_ind": bkg_ind,
@@ -84,7 +85,8 @@ branches = {
     "trk_nValidPixel": trk_nValidPixel, "trk_nValidStrip": trk_nValidStrip, "trk_charge": trk_charge,
     "missed_sig": missed_sig, "trk_1": trk_1, "trk_2": trk_2, "deltaR": deltaR,
     "dca": dca, "dca_sig": dca_sig, "cptopv": cptopv, "pvtoPCA_1": pvtoPCA_1, "pvtoPCA_2": pvtoPCA_2,
-    "dotprod_1": dotprod_1, "dotprod_2": dotprod_2, "pair_mom": pair_mom, "pair_invmass": pair_invmass
+    "dotprod_1": dotprod_1, "dotprod_2": dotprod_2, "pair_mom": pair_mom, "pair_invmass": pair_invmass,
+    "preds": preds
 }
 
 for name, branch in branches.items():
@@ -119,6 +121,7 @@ for i, evt in enumerate(tree):
     nHads = evt.nHadrons[0]
     had_pt.reserve(nHads)
     had_pt.assign(evt.Hadron_pt.begin(), evt.Hadron_pt.end());
+    preds.assign(evt.preds.begin(), evt.preds.end())
 
     trk_1.assign(list(evt.trk_i))
     trk_2.assign(list(evt.trk_j))
