@@ -204,7 +204,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
             bkginds=torch.tensor(evtbkginds, dtype=torch.int16),
             svinds=torch.tensor(evtsvinds, dtype=torch.int16),
-            edge_index=torch.tensor(edge_index, dtype=torch.float),
+            edge_index=torch.tensor(edge_index, dtype=torch.int64),
             edge_attr=torch.tensor(edge_features, dtype=torch.float) 
         )
         print("X", fullfeatmat.shape)

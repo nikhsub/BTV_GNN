@@ -539,9 +539,6 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<std::vector<float>> edge_features;
    std::vector<int64_t> edge_i, edge_j;
 
-   // Container to remember which tracks have bad features
-   std::unordered_set<int> bad_track_indices;
-   
    // Step 1: Build track_features, and track bad ones
    for (size_t i = 0; i < static_cast<size_t>(ntrk); ++i) {
        std::vector<float> features = {
@@ -568,7 +565,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
        }
    
        if (has_nan) {
-           bad_track_indices.insert(i);
+	   features = {
+            -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f,  // 8 dummy float features
+            -1.0f, -1.0f, -1.0f,  // 3 dummy int features as float
+            -3.0f          // charge dummy
+           };
        }
    
        track_features.push_back(features);
@@ -580,7 +581,6 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
        int i = trk_i[idx];
        int j = trk_j[idx];
 
-       if (bad_track_indices.count(i) || bad_track_indices.count(j)) continue;
        if (cptopv[idx] >= 100.0 || pair_mom[idx] >= 100.0) continue;
 
        edge_i.push_back(i);
@@ -591,10 +591,10 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         deltaR[idx],
         dca_sig[idx],
         cptopv[idx],
-        pvtoPCA_j[idx],
         pvtoPCA_i[idx],
-        dotprod_j[idx],
+        pvtoPCA_j[idx],
         dotprod_i[idx],
+        dotprod_j[idx],
         pair_mom[idx],
         pair_invmass[idx]
         }); 
@@ -611,7 +611,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
        edge_index_flat_f.push_back(static_cast<float>(edge_i[k]));
        edge_index_flat_f.push_back(static_cast<float>(edge_j[k]));
    }
-  
+
    std::vector<float> edge_attr_flat;
    edge_attr_flat.reserve(edge_features.size() * 10);
    for (const auto& feat : edge_features)
@@ -639,24 +639,42 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    // Get logits from output[1]
    std::vector<float> logits_data = output[1];  // output[1] is "node_probs"
 
+   for (size_t i = 0; i < logits_data.size(); ++i) {
+       float logit = logits_data[i];
+       if (std::abs(logit) > 40.0f) {
+           std::cout << "=== Anomalous Logit ===" << std::endl;
+           std::cout << "Index " << i << ", Logit: " << logit << std::endl;
+
+           const auto& features = track_features[i];
+           std::cout << "Track Features: [";
+           for (size_t j = 0; j < features.size(); ++j) {
+               std::cout << features[j];
+               if (j != features.size() - 1) std::cout << ", ";
+           }
+           std::cout << "]\n";
+       }
+   }
+
    std::vector<reco::TransientTrack> t_trks_SV;
 
    std::vector<std::pair<float, size_t>> score_index_pairs;
    for (size_t i = 0; i < logits_data.size(); ++i) {
+       if (std::isnan(logits_data[i])) {
+           std::cerr << "Warning: NaN in logit at index " << i;
+       }
+       std::cout << "Logit" << i << logits_data[i] << std::endl;
        float raw_score = sigmoid(logits_data[i]);
        if (std::isnan(raw_score)) {
            std::cerr << "Warning: NaN in sigmoid at index " << i << ", setting to 0.0\n";
        }
-       float score = std::isnan(raw_score) ? 0.0f : raw_score;
-       preds.push_back(score);
-       score_index_pairs.emplace_back(score, i);  // (score, index)
+       preds.push_back(raw_score);
+       score_index_pairs.emplace_back(raw_score, i);  // (score, index)
    }
    
    // Step 2: Sort by descending score
    std::sort(score_index_pairs.begin(), score_index_pairs.end(),
              [](const auto& a, const auto& b) { return a.first > b.first; });
    
-   // Step 3: Keep top 5%
    size_t n_keep = std::max<size_t>(1, score_index_pairs.size() * TrackPredCut_);  // ensure at least one
    for (size_t k = 0; k < n_keep; ++k) {
        size_t idx = score_index_pairs[k].second;

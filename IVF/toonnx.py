@@ -4,6 +4,8 @@ warnings.filterwarnings("ignore")
 import torch
 from GCNModel import *
 import argparse
+import onnxruntime as ort
+import numpy as np
 
 parser = argparse.ArgumentParser("GNN testing")
 
@@ -35,11 +37,6 @@ print(f"x_in shape: {x_in.shape}")
 print(f"edge_index shape: {edge_index.shape}")
 print(f"edge_attr shape: {edge_attr.shape}")
 
-# Run once to verify
-with torch.no_grad():
-    xf, node_probs = model(x_in, edge_index, edge_attr)
-    print("Model output shapes:", xf.shape, node_probs.shape)
-
 # Export to ONNX
 outname = args.output + ".onnx"
 with torch.no_grad():
@@ -58,5 +55,31 @@ with torch.no_grad():
     )
 
 print(f"ONNX model saved to {outname}")
+
+session = ort.InferenceSession(outname)
+
+# Prepare input dictionary for ONNX (must use .cpu().numpy())
+onnx_inputs = {
+    "x_in": x_in.cpu().numpy(),
+    "edge_index": edge_index.cpu().numpy(),  # ensure int64
+    "edge_attr": edge_attr.cpu().numpy(),
+}
+
+# Run inference with ONNX model
+onnx_outputs = session.run(None, onnx_inputs)
+onnx_node_probs = torch.tensor(onnx_outputs[1])
+
+# Get outputs from PyTorch model again
+with torch.no_grad():
+    _, torch_node_probs = model(x_in, edge_index, edge_attr)  # force edge_index to long
+
+# Compare outputs
+abs_diff = torch.abs(torch_node_probs.cpu() - onnx_node_probs.cpu())
+max_diff = abs_diff.max().item()
+mean_diff = abs_diff.mean().item()
+
+print(f"ONNX vs PyTorch consistency check:")
+print(f"Max difference:  {max_diff:.6e}")
+print(f"Mean difference: {mean_diff:.6e}")
 
 

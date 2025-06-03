@@ -110,17 +110,12 @@ all_labels = np.array(all_labels)
 
 fpr, tpr, thresholds = roc_curve(all_labels, all_preds)
 
-print(fpr)
-print(tpr)
-
 sv_tpr = sv_tp / (sv_tp + sv_fn) if (sv_tp + sv_fn) > 0 else 0
 sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
 
 sv_tpr_array = np.full_like(thresholds, sv_tpr)
 sv_fpr_array = np.full_like(thresholds, sv_fpr)
 
-print(sv_tpr_array)
-print(sv_fpr_array)
 
 # Calculate the AUC (Area Under the Curve)
 roc_auc = auc(fpr, tpr)
@@ -142,3 +137,25 @@ plt.savefig(f"ROC_{args.savetag}_{i+1}evts.png")
 plt.close()
 
 print("Total number of tracks", num_trks)
+
+# === Plot the output probability distribution ===
+plt.figure(figsize=(8, 6))
+
+# Separate predictions
+signal_preds = all_preds[all_labels == 1]
+background_preds = all_preds[all_labels == 0]
+
+# Plot histogram
+plt.hist(signal_preds, bins=50, alpha=0.6, color='red', label='Signal', density=False)
+plt.hist(background_preds, bins=50, alpha=0.6, color='blue', label='Background', density=False)
+plt.yscale('log')
+
+plt.xlabel('Predicted Probability')
+plt.ylabel('# of tracks')
+plt.title('Model Output Distribution')
+plt.legend()
+plt.grid()
+
+plt.savefig(f"OutputDist_{args.savetag}_{i+1}evts.png")
+plt.close()
+

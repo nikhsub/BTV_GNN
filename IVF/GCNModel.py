@@ -29,7 +29,7 @@ class GNNModel(torch.nn.Module):
     def __init__(self, indim, outdim, edge_dim):
         super(GNNModel, self).__init__()
 
-        self.bn0 = nn.BatchNorm1d(indim)
+        self.bn0 = nn.LayerNorm(indim)
 
         self.proj_skip = nn.Linear(indim, outdim)
 
@@ -77,9 +77,8 @@ class GNNModel(torch.nn.Module):
         batch_size, num_nodes, _ = x_in.shape
         xf_all, probs_all = [], []
 
-        if edge_index.dtype == torch.float32:
-            edge_index = edge_index.long()
-        
+        edge_index = edge_index.long()
+
         for b in range(batch_size):
             x = x_in[b]                          # [num_nodes, indim]
             e_idx = edge_index[b]               # [2, num_edges]

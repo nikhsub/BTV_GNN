@@ -10,7 +10,7 @@ from sklearn.metrics import (
 )
 
 # Load ROOT tree
-infile = "ntup_preds.root"
+infile = "ntuppreds_3005.root"
 Infile = ROOT.TFile(infile, "READ")
 tree = Infile.Get("tree")
 
@@ -20,11 +20,12 @@ y_score = []
 
 for evt in tree:
     sig_set = set(evt.sig_ind)
+    print("Siginds", sig_set)
     preds = evt.preds
 
     for idx, score in enumerate(preds):
-        if not np.isfinite(score):
-            score = 0.0
+        #if not np.isfinite(score):
+        #    score = 0.0
         y_score.append(score)
         y_true.append(1 if idx in sig_set else 0)
 
@@ -52,8 +53,9 @@ fig, axs = plt.subplots(1, 3, figsize=(18, 5))
 
 # 1. Score Distribution
 bins = np.linspace(0, 1, 50)
-axs[0].hist(background_scores, bins=bins, alpha=0.5, label="Background", color="blue", density=True)
-axs[0].hist(signal_scores, bins=bins, alpha=0.7, label="Signal", color="red", density=True)
+axs[0].hist(background_scores, bins=bins, alpha=0.5, label="Background", color="blue", density=False)
+axs[0].hist(signal_scores, bins=bins, alpha=0.7, label="Signal", color="red", density=False)
+axs[0].set_yscale('log')
 axs[0].set_title("Track Score Distribution")
 axs[0].set_xlabel("Model Score")
 axs[0].set_ylabel("Density")
