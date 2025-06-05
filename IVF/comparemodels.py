@@ -81,9 +81,9 @@ def evaluate(graphs, model, device):
             edge_index = data.edge_index.cpu().numpy()
             edge_attr = data.edge_attr.cpu().numpy()
 
-            logits_p = logits.squeeze()  # remove batch dim -> shape: [num_nodes, 1]
-            for idx, logit in enumerate(logits_p):
-                print(f"Index {idx}: {logit.item():.6f}")
+            #logits_p = logits.squeeze()  # remove batch dim -> shape: [num_nodes, 1]
+            #for idx, logit in enumerate(logits_p):
+            #    print(f"{logit.item():.6f}")
             
 
             preds = torch.sigmoid(logits)
@@ -152,6 +152,9 @@ model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu'))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model1.to(device)
+with torch.no_grad():
+    print("Dummy token during eval:")
+    print(model1.dummy_token.detach().cpu().numpy())
 
 total_params = sum(p.numel() for p in model1.parameters())
 trainable_params = sum(p.numel() for p in model1.parameters() if p.requires_grad)
@@ -165,6 +168,8 @@ with open(args.model2, "rb") as f:
 print(f"Loading data from {args.file}...")
 with open(args.file, 'rb') as f:
     graphs = pickle.load(f)
+
+graphs = [graphs[0]]
 
 # Evaluate both files
 print("Running GNN inference....")

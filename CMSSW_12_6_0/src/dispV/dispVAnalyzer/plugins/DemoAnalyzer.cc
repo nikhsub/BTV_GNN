@@ -641,7 +641,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    for (size_t i = 0; i < logits_data.size(); ++i) {
        float logit = logits_data[i];
-       if (std::abs(logit) > 40.0f) {
+       std::cout << logit << std::endl;
+       if (i == 59 || i ==60) {
            std::cout << "=== Anomalous Logit ===" << std::endl;
            std::cout << "Index " << i << ", Logit: " << logit << std::endl;
 
@@ -662,7 +663,6 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
        if (std::isnan(logits_data[i])) {
            std::cerr << "Warning: NaN in logit at index " << i;
        }
-       std::cout << "Logit" << i << logits_data[i] << std::endl;
        float raw_score = sigmoid(logits_data[i]);
        if (std::isnan(raw_score)) {
            std::cerr << "Warning: NaN in sigmoid at index " << i << ", setting to 0.0\n";

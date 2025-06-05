@@ -10,7 +10,7 @@ from sklearn.metrics import (
 )
 
 # Load ROOT tree
-infile = "ntuppreds_3005.root"
+infile = "ntup_nanfix2.root"
 Infile = ROOT.TFile(infile, "READ")
 tree = Infile.Get("tree")
 
@@ -20,7 +20,7 @@ y_score = []
 
 for evt in tree:
     sig_set = set(evt.sig_ind)
-    print("Siginds", sig_set)
+    #print("Siginds", sig_set)
     preds = evt.preds
 
     for idx, score in enumerate(preds):

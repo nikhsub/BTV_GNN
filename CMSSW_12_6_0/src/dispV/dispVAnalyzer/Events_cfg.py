@@ -14,7 +14,7 @@ process.load('RecoTracker.Configuration.RecoTracker_cff')
 #process.load('Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff')
 process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3))
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(1))
 
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
@@ -64,11 +64,11 @@ vertexfitter = cms.untracked.PSet(
      ),
 TrackPredCut = cms.untracked.double(0.10),
 clusterizer = ClusteringParam,
-model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_layernormfix_3005.onnx")
+model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out48_nanfix2_0406.onnx")
 )
 
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("debug_2.root"),
+        fileName = cms.string("outnanfix2.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles+process.demo)

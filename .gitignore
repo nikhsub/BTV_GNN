@@ -7,6 +7,8 @@
 *.pth
 *.pkl
 *.txt
+*.onnx
+*.swp
 CMSSW_12_6_0/biglib
 CMSSW_12_6_0/cfipython
 CMSSW_12_6_0/doc

@@ -220,16 +220,16 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         total_node_loss += node_loss.item()
         total_cont_loss += cont_loss.item()
         total_eff_loss  += eff_loss.item()
-        all_gate_values.append(model.last_gate.mean().item())
+        #all_gate_values.append(model.last_gate.mean().item())
 
     avg_loss = total_loss / len(train_loader)
     avg_node_loss = total_node_loss / len(train_loader)
     avg_cont_loss = total_cont_loss / len(train_loader)
     avg_eff_loss  = total_eff_loss / len(train_loader)
-    avg_gate_val = sum(all_gate_values) / len(all_gate_values)
+    #avg_gate_val = sum(all_gate_values) / len(all_gate_values)
 
     #print(f"No seed hadrons: {nosigseeds}")
-    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss, avg_gate_val
+    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss, 0.0
 
 #TEST
 def test(model, test_loader, device, epoch, k=11, thres=0.5):
