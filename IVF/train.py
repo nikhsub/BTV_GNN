@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 import os
 import torch.nn.functional as F
 import math
-from GCNModel import *
+from debugGCNModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
@@ -183,7 +183,7 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
         
         #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
-        node_embeds1, preds1 = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
+        node_embeds1, preds1, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
         
         #edge_index2, edge_attr2 = drop_edges(data.edge_index, data.edge_attr, 0.5)
         #node_embeds2, _, _,_,_ = model(.unsqueeze(0)data.x, edge_index2, edge_attr2)
@@ -256,7 +256,7 @@ def test(model, test_loader, device, epoch, k=11, thres=0.5):
             
             #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
 
-            _, logits = model(batch.x.unsqueeze(0), batch.edge_index.unsqueeze(0), batch.edge_attr.unsqueeze(0))
+            _, logits, *_ = model(batch.x.unsqueeze(0), batch.edge_index.unsqueeze(0), batch.edge_attr.unsqueeze(0))
             preds = torch.sigmoid(logits).squeeze(0)
 
             all_preds.extend(preds.squeeze().cpu().numpy())
@@ -310,7 +310,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
             try:
                 data = data.to(device)
                 #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-                _, logits = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
+                _, logits, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
                 preds = torch.sigmoid(logits).squeeze(0)
                 preds = preds.squeeze()
                 logits_cpu = logits.detach().cpu()
