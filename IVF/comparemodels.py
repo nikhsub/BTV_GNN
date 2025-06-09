@@ -169,7 +169,7 @@ print(f"Loading data from {args.file}...")
 with open(args.file, 'rb') as f:
     graphs = pickle.load(f)
 
-graphs = [graphs[0]]
+#graphs = [graphs[0]]
 
 # Evaluate both files
 print("Running GNN inference....")

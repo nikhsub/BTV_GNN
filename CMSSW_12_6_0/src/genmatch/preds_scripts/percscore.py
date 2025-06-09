@@ -1,7 +1,7 @@
 import numpy as np
 import ROOT
 
-file = ROOT.TFile("ntup_preds.root")
+file = ROOT.TFile("ntup_onnxfix_0906.root")
 tree = file.Get("tree")
 
 # Global containers

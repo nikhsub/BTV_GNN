@@ -620,12 +620,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    for (const auto& feat : edge_features)
        edge_attr_flat.insert(edge_attr_flat.end(), feat.begin(), feat.end());
 
-std::cout << "track_features.size(): " << track_features.size() << "\n";
-std::cout << "x_in_flat.size(): " << x_in_flat.size() << "\n";
-std::cout << "edge_index_flat_f.size(): " << edge_index_flat_f.size() << "\n";
-std::cout << "edge_attr_flat.size(): " << edge_attr_flat.size() << "\n";
-std::cout << "edge_i.size(): " << edge_i.size() << "\n";
-std::cout << "edge_features.size(): " << edge_features.size() << "\n";
+//std::cout << "track_features.size(): " << track_features.size() << "\n";
+//std::cout << "x_in_flat.size(): " << x_in_flat.size() << "\n";
+//std::cout << "edge_index_flat_f.size(): " << edge_index_flat_f.size() << "\n";
+//std::cout << "edge_attr_flat.size(): " << edge_attr_flat.size() << "\n";
+//std::cout << "edge_i.size(): " << edge_i.size() << "\n";
+//std::cout << "edge_features.size(): " << edge_features.size() << "\n";
 
 
       

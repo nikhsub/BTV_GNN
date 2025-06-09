@@ -102,6 +102,15 @@ print(f"Mean difference: {mean_diff:.6e}")
 
 print(f"ONNX model saved to {outname}")
 
+import onnx
+
+model = onnx.load(outname)
+scatter_nodes = [n for n in model.graph.node if n.op_type == "ScatterND"]
+
+print(f"Found {len(scatter_nodes)} ScatterND nodes.")
+for node in scatter_nodes:
+    print(" -", node.name or "[unnamed]", "inputs:", node.input)
+
 #import onnx
 #model2 = onnx.load(outname)
 #for inp in model2.graph.input:

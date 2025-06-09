@@ -2,12 +2,12 @@ import ROOT
 from collections import Counter
 import numpy as np
 
-infile = "ntup_preds.root"
+infile = "ntup_onnxfix_0906.root"
 Infile = ROOT.TFile(infile, 'READ')
 
 tree = Infile.Get('tree')
 
-score_thresh = 0.36
+score_thresh = 0.4472
 
 # Initialize global counters
 TP_model = FP_model = FN_model = TN_model = 0
