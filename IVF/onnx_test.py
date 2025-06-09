@@ -28,7 +28,8 @@ ort.set_default_logger_severity(3)
 parser = argparse.ArgumentParser("GNN testing")
 
 parser.add_argument("-lt", "--load_train", default="", help="Load training data from a file")
-parser.add_argument("-lm",  "--load_model", default="", help="Load model file")
+parser.add_argument("-lo",  "--load_onnx", default="", help="Load onnx model file")
+parser.add_argument("-lp", "--load_pytorch", default="", help="Load pytorch model file")
 parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
 
 args = parser.parse_args()
@@ -59,10 +60,15 @@ def run_onnx_inference(onnx_model_path, inputs, session):
     # Convert ONNX output back to torch tensor
     return torch.tensor(ort_outs[1])
 
-session = ort.InferenceSession(args.load_model)
+session = ort.InferenceSession(args.load_onnx)
+model1 = GNNModel(len(trk_features), 48, edge_dim=len(edge_features))
+model1.load_state_dict(torch.load(args.load_pytorch, map_location=torch.device('cpu')))
+model1.eval()
 
 all_preds = []
 all_labels = []
+all_preds_pth = []                                                                                                                                                                                          
+all_labels_pth = []
 sv_tp = 0
 sv_fp = 0
 sv_tn = 0
@@ -76,7 +82,9 @@ for i, data in enumerate(val_graphs):
         data = data.to(device)
 
         # Run ONNX model
-        logits = run_onnx_inference(args.load_model, (data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0)), session).to(device)
+        logits = run_onnx_inference(args.load_onnx, (data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0)), session).to(device)
+        _, logits_pth = model1(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
+
 
         preds = torch.sigmoid(logits)
         preds = preds.squeeze()
@@ -105,10 +113,23 @@ for i, data in enumerate(val_graphs):
         sv_tn += tn
         sv_fn += fn
 
+        preds_pth = torch.sigmoid(logits_pth)
+        preds_pth = preds_pth.squeeze()
+        preds_pth = preds_pth.cpu().numpy()
+        labels_pth = np.zeros(len(preds_pth))
+        labels_pth[siginds] = 1
+
+        all_preds_pth.extend(preds_pth)
+        all_labels_pth.extend(labels_pth)
+
 all_preds = np.array(all_preds)
 all_labels = np.array(all_labels)
+all_preds_pth = np.array(all_preds_pth)
+all_labels_pth = np.array(all_labels_pth)
+
 
 fpr, tpr, thresholds = roc_curve(all_labels, all_preds)
+fpr_pth, tpr_pth, thresholds_pth = roc_curve(all_labels_pth, all_preds_pth)
 
 sv_tpr = sv_tp / (sv_tp + sv_fn) if (sv_tp + sv_fn) > 0 else 0
 sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
@@ -119,11 +140,13 @@ sv_fpr_array = np.full_like(thresholds, sv_fpr)
 
 # Calculate the AUC (Area Under the Curve)
 roc_auc = auc(fpr, tpr)
+roc_auc_pth = auc(fpr_pth, tpr_pth)
 
 # Plot the ROC curve
 plt.figure(figsize=(8, 6))
-plt.plot(tpr, fpr, color='darkorange', label=f'GNN model (AUC = {roc_auc:.4f})')
-plt.scatter(sv_tpr_array, sv_fpr_array, color='blue', label=f'IVF TPR={sv_tpr:.4f}, FPR={sv_fpr:.4f}', zorder=5)
+plt.plot(tpr, fpr, color='darkorange', label=f'ONNX model (AUC = {roc_auc:.4f})')
+plt.plot(tpr_pth, fpr_pth, color='blue', label=f'pth model (AUC = {roc_auc_pth:.4f})')
+plt.scatter(sv_tpr_array, sv_fpr_array, color='black', label=f'IVF TPR={sv_tpr:.4f}, FPR={sv_fpr:.4f}', zorder=5)
 
 plt.xlabel('Signal Accuracy')
 plt.ylabel('Background Mistag')

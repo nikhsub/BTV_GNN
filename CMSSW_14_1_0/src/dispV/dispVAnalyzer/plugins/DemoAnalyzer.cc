@@ -609,6 +609,9 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    edge_index_flat_f.reserve(edge_i.size() * 2);
    for (size_t k = 0; k < edge_i.size(); ++k) {
        edge_index_flat_f.push_back(static_cast<float>(edge_i[k]));
+   }
+
+   for (size_t k = 0; k < edge_j.size(); ++k) {
        edge_index_flat_f.push_back(static_cast<float>(edge_j[k]));
    }
 
@@ -616,6 +619,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    edge_attr_flat.reserve(edge_features.size() * 10);
    for (const auto& feat : edge_features)
        edge_attr_flat.insert(edge_attr_flat.end(), feat.begin(), feat.end());
+
+std::cout << "track_features.size(): " << track_features.size() << "\n";
+std::cout << "x_in_flat.size(): " << x_in_flat.size() << "\n";
+std::cout << "edge_index_flat_f.size(): " << edge_index_flat_f.size() << "\n";
+std::cout << "edge_attr_flat.size(): " << edge_attr_flat.size() << "\n";
+std::cout << "edge_i.size(): " << edge_i.size() << "\n";
+std::cout << "edge_features.size(): " << edge_features.size() << "\n";
+
 
       
    // === 4. Set input names and feed data ===
@@ -632,6 +643,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     edge_index_flat_f,
     edge_attr_flat
    };
+
 
    std::vector<std::vector<float>> output = globalCache()->run(input_names_, data_, input_shapes_);
    

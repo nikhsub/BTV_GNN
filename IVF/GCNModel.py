@@ -101,26 +101,20 @@ class GNNModel(torch.nn.Module):
 
     def forward(self, x_in, edge_index, edge_attr):
 
-        batch_size, num_nodes, _ = x_in.shape
-        xf_all, probs_all = [], []
+        _, num_nodes, _ = x_in.shape
+        #xf_all, probs_all = [], []
 
         edge_index = edge_index.long()
 
-        x = x_in[0]                          # [num_nodes, indim]
-        e_idx = edge_index[0]               # [2, num_edges]
-        e_attr = edge_attr[0]               # [num_edges, edge_dim]
+        #for b in range(batch_size):
+
+        x = x_in.squeeze(0)                          # [num_nodes, indim]
+        e_idx = edge_index.squeeze(0)               # [2, num_edges
+        e_attr = edge_attr.squeeze(0)               # [num_edges, edge_dim]
 
 
-        #manual_dummy = torch.tensor(
-        #    [-2.3952117, 0.54164386, 0.09683848, 0.85531396, 0.7040078,
-        #     0.21099302, 1.6392194, 0.24887794, -1.8308424, -1.1111757,
-        #     -1.0824525, -1.8598198],
-        #    dtype=x.dtype,
-        #    device=x.device
-        #)
         invalid_mask = (x[:, 0] == -999.0)
         x[invalid_mask] = self.dummy_token
-        #x[invalid_mask] = manual_dummy
 
         x = self.bn0(x)
 
@@ -143,14 +137,46 @@ class GNNModel(torch.nn.Module):
         xf = gate * self.proj_skip(x) + torch.sub(1, gate) * x2
 
         ones = torch.ones(e_idx.size(1), device=x.device)
-        deg = self.onnx_scatter(ones, e_idx[1], num_nodes).unsqueeze(1).clamp(min=1)
-        edge_feats_sum = self.onnx_scatter(e_attr_enc, e_idx[1], num_nodes)
+        #deg = scatter_add(ones, e_idx[1], dim=0, dim_size=num_nodes).unsqueeze(1).clamp(min=1)
+        #edge_feats_sum = scatter_add(e_attr_enc, e_idx[1], dim=0, dim_size=num_nodes)
+        #deg = self.onnx_scatter(ones, e_idx[1], num_nodes).unsqueeze(1).clamp(min=1)
+        #edge_feats_sum = self.onnx_scatter(e_attr_enc, e_idx[1], num_nodes)
+        #num_edges = e_idx.size(1)
+        #ones = torch.ones(num_edges, device=x.device, dtype=x.dtype)
+        #deg = torch.zeros(num_nodes, device=x.device, dtype=x.dtype)
+        #deg = deg.scatter_add(0, e_idx[1], ones).unsqueeze(1).clamp(min=1.0)
+        #
+        ## Compute “sum of edge features” per node
+        #outdim = e_attr_enc.size(1)
+        #edge_feats_sum = torch.zeros(num_nodes, outdim, device=x.device, dtype=x.dtype)
+        #idx_expanded = e_idx[1].unsqueeze(-1).expand(-1, outdim)  # [num_edges, outdim]
+        #edge_feats_sum = edge_feats_sum.scatter_add(0, idx_expanded, e_attr_enc)
+
+        #deg = torch.zeros(num_nodes, 1, device=x.device)
+        #deg = deg.index_add_(0, e_idx[1], ones.unsqueeze(1)).clamp(min=1)
+        #
+        #edge_feats_sum = torch.zeros(num_nodes, e_attr_enc.size(-1), device=x.device)
+        #edge_feats_sum = edge_feats_sum.index_add(0, e_idx[1], e_attr_enc)
+
+        if torch.onnx.is_in_onnx_export():
+            print("Export-time path (one_hot)")
+            one_hot = F.one_hot(e_idx[1], num_classes=num_nodes).float()
+            deg = (one_hot.T @ ones.unsqueeze(1)).clamp(min=1.0)
+            edge_feats_sum = one_hot.T @ e_attr_enc
+        else:
+            deg = scatter_add(ones, e_idx[1], dim=0, dim_size=num_nodes).unsqueeze(1).clamp(min=1.0)
+            edge_feats_sum = scatter_add(e_attr_enc, e_idx[1], dim=0, dim_size=num_nodes)
+         
         edge_feats_mean = edge_feats_sum / deg
 
         xf_combined = torch.cat([xf, edge_feats_mean], dim=1)
         node_probs = self.node_pred(xf_combined)
 
-        return xf_combined.unsqueeze(0), node_probs.unsqueeze(0)
+            #xf_all.append(xf_combined)
+            #probs_all.append(node_probs)
+
+        #return torch.stack(xf_all), torch.stack(probs_all)
+        return xf_combined, node_probs
 
 
 
