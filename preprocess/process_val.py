@@ -35,8 +35,8 @@ print("NUMEVTS", num_evts)
 trk_data = {feat: datatree[feat].array() for feat in trk_features}
 sig_ind_array = datatree['sig_ind'].array()
 sig_flag_array = datatree['sig_flag'].array()
-bkg_flag_array = datatree['bkg_flag'].array()
-bkg_ind_array = datatree['bkg_ind'].array()
+#bkg_flag_array = datatree['bkg_flag'].array()
+#bkg_ind_array = datatree['bkg_ind'].array()
 #seed_array = datatree['seed_ind'].array()
 SV_ind_array = datatree['SVtrk_ind'].array()
 had_pt_array = datatree['had_pt'].array()
@@ -131,7 +131,7 @@ def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1
 
     return edge_index, edge_features
 
-def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array, 
+def create_dataobj(trk_data, sig_ind_array, sig_flag_array, 
                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features, nevts=3):
@@ -171,8 +171,8 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
         pair_invmass = pair_invmass_array[evt]
             
         evtsigflags = [sig_flag_array[evt][np.where(sig_ind_array[evt] == ind)[0][0]] for ind in evtsiginds]
-        evtbkginds = list(set(bkg_ind_array[evt]))
-        evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
+        #evtbkginds = list(set(bkg_ind_array[evt]))
+        #evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
         evtsvinds = list(set(SV_ind_array[evt]))
 
         # Adjust valid indices for masking
@@ -181,7 +181,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
         if(not args.test):
             if(len(evtsiginds) < 3) : continue
 
-        evtbkginds = [val_inds_map[ind] for ind in evtbkginds if ind in val_inds_map]
+        #evtbkginds = [val_inds_map[ind] for ind in evtbkginds if ind in val_inds_map]
         evtsvinds  = [val_inds_map[ind] for ind in evtsvinds if ind in val_inds_map]
         evtsigflags = [flag for ind, flag in zip(sig_ind_array[evt], evtsigflags) if ind in valid_indices]
         
@@ -202,7 +202,6 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
             x=torch.tensor(fullfeatmat, dtype=torch.float),
             siginds=torch.tensor(evtsiginds, dtype=torch.int16),
             sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
-            bkginds=torch.tensor(evtbkginds, dtype=torch.int16),
             svinds=torch.tensor(evtsvinds, dtype=torch.int16),
             edge_index=torch.tensor(edge_index, dtype=torch.float),
             edge_attr=torch.tensor(edge_features, dtype=torch.float) 
@@ -216,7 +215,7 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_
     return evt_objects
 
 print("Creating data objects...")
-evt_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array, bkg_flag_array, bkg_ind_array,
+evt_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array,
                                     SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
                                     dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
                                     dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features)

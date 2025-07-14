@@ -122,6 +122,10 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       double vtxweight_;
       std::unique_ptr<TracksClusteringFromDisplacedSeed> clusterizer;
 
+      unsigned int run_;
+      unsigned int lumi_;
+      unsigned int evt_;
+
       TTree *tree;
       float nPU;
 

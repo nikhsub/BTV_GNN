@@ -10,7 +10,7 @@ from sklearn.metrics import (
 )
 
 # Load ROOT tree
-infile = "ntup_onnxfix_0906.root"
+infile = "ntup_ttbarhad3k.root"
 Infile = ROOT.TFile(infile, "READ")
 tree = Infile.Get("tree")
 

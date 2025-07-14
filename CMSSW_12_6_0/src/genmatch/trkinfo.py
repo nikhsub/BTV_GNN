@@ -178,9 +178,9 @@ for i, evt in enumerate(tree):
     delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
     valid_tracks = (trk_pt_array >= 0.5) & (np.abs(trk_eta_array) < 2.5)
     
-    bkg_mask1 = valid_tracks[:, None] & (delta_R_matrix < 0.02) & (0.6 <= (trk_pt_array[:, None] / d_pt_array)) & ((trk_pt_array[:, None] / d_pt_array) < 0.8)
-    bkg_mask2 = valid_tracks[:, None] & (0.02 < delta_R_matrix) & (delta_R_matrix < 0.1)
-    bkg_mask3 = valid_tracks[:, None] & (0.1 < delta_R_matrix) & (delta_R_matrix < 0.2)
+    #bkg_mask1 = valid_tracks[:, None] & (delta_R_matrix < 0.02) & (0.6 <= (trk_pt_array[:, None] / d_pt_array)) & ((trk_pt_array[:, None] / d_pt_array) < 0.8)
+    #bkg_mask2 = valid_tracks[:, None] & (0.02 < delta_R_matrix) & (delta_R_matrix < 0.1)
+    #bkg_mask3 = valid_tracks[:, None] & (0.1 < delta_R_matrix) & (delta_R_matrix < 0.2)
     
     
     min_deltaR_indices = np.argmin(delta_R_matrix, axis=0)
@@ -197,13 +197,13 @@ for i, evt in enumerate(tree):
     sig_flav.assign(d_flav_array[sig_daughters].tolist())
 
     
-    bkg_indices, bkg_daughters = np.where(bkg_mask1 | bkg_mask2 | bkg_mask3)
-    if len(bkg_indices) > 20:
-        sampled_indices = np.random.choice(len(bkg_indices), size=20, replace=False)
-        bkg_indices = bkg_indices[sampled_indices]
-        bkg_daughters = bkg_daughters[sampled_indices]
-    bkg_flag.assign(d_flag_array[bkg_daughters].tolist())
-    bkg_ind.assign(bkg_indices.tolist())
+    #bkg_indices, bkg_daughters = np.where(bkg_mask1 | bkg_mask2 | bkg_mask3)
+    #if len(bkg_indices) > 20:
+    #    sampled_indices = np.random.choice(len(bkg_indices), size=20, replace=False)
+    #    bkg_indices = bkg_indices[sampled_indices]
+    #    bkg_daughters = bkg_daughters[sampled_indices]
+    #bkg_flag.assign(d_flag_array[bkg_daughters].tolist())
+    #bkg_ind.assign(bkg_indices.tolist())
     
     outtree.Fill()
 
