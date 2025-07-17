@@ -6,6 +6,7 @@ import argparse
 import math
 import numpy as np
 import random
+import csv
 
 parser = argparse.ArgumentParser("Create track information root file")
 
@@ -37,6 +38,10 @@ outtree = TTree("tree", "tree")
 sig_ind       = std.vector('int')()
 sig_flag      = std.vector('int')()
 sig_flav      = std.vector('int')()
+
+run = std.vector('int')()
+lumi = std.vector('int')()
+event = std.vector('int')()
 
 bkg_ind       = std.vector('int')()
 bkg_flag      = std.vector('int')()
@@ -78,7 +83,8 @@ pair_invmass    = std.vector('double')()
 preds           = std.vector('double')()
 
 branches = {
-    "had_pt": had_pt, "sig_flag": sig_flag, "sig_flav": sig_flav, "sig_ind": sig_ind, "bkg_ind": bkg_ind,
+
+    "run": run, "lumi": lumi, "event": event, "had_pt": had_pt, "sig_flag": sig_flag, "sig_flav": sig_flav, "sig_ind": sig_ind, "bkg_ind": bkg_ind,
     "bkg_flag": bkg_flag, "SVtrk_ind": SVtrk_ind, "trk_ip2d": trk_ip2d,
     "trk_ip3d": trk_ip3d, "trk_ip2dsig": trk_ip2dsig, "trk_ip3dsig": trk_ip3dsig, "trk_p": trk_p,
     "trk_pt": trk_pt, "trk_eta": trk_eta, "trk_phi": trk_phi, "trk_nValid": trk_nValid,
@@ -91,6 +97,12 @@ branches = {
 
 for name, branch in branches.items():
     outtree.Branch(name, branch)
+
+run_list = []   # or directly append run number per event
+lumi_list = []
+evt_list = []
+
+sig_ind_list = []
 
 #outtree.Branch("delr", delr)
 #outtree.Branch("ptrat", ptrat)
@@ -122,6 +134,10 @@ for i, evt in enumerate(tree):
     had_pt.reserve(nHads)
     had_pt.assign(evt.Hadron_pt.begin(), evt.Hadron_pt.end());
     preds.assign(evt.preds.begin(), evt.preds.end())
+
+    run.push_back(int(evt.run))
+    lumi.push_back(int(evt.lumi))
+    event.push_back(int(evt.evt))
 
     trk_1.assign(list(evt.trk_i))
     trk_2.assign(list(evt.trk_j))
@@ -207,6 +223,22 @@ for i, evt in enumerate(tree):
     
     outtree.Fill()
 
+    run_list.append(int(evt.run))
+    lumi_list.append(int(evt.lumi))
+    evt_list.append(int(evt.evt))
+    sig_ind_list.append(sig_indices.tolist())
+    
+
 
 Outfile.WriteTObject(outtree, "tree")
 Outfile.Close()
+
+
+with open("genmatch_info.csv", "w", newline="") as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow(["run", "lumi", "event", "sig_ind"])
+
+    for i in range(len(run_list)):
+        sig_str = "[" + ",".join(str(x) for x in sig_ind_list[i]) + "]"
+        writer.writerow([run_list[i], lumi_list[i], evt_list[i], sig_str])
+

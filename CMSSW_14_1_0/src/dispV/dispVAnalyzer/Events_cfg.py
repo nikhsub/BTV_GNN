@@ -62,13 +62,14 @@ vtxweight = cms.untracked.double(0.5),
 vertexfitter = cms.untracked.PSet(
          finder = cms.string('avr')
      ),
-TrackPredCut = cms.untracked.double(0.370),
+TrackPredCut = cms.untracked.double(0.400),
 clusterizer = ClusteringParam,
-model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_out48_hadtrain_2606.onnx")
+model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_out48_hadtrain_2606.onnx"),
+genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/data/genmatch_info_1407.csv")
 )
 
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbar_hadronic_1407.root"),
+        fileName = cms.string("ttbar_hadronic_1507_genvertexing.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles+process.demo)

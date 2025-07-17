@@ -42,7 +42,8 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
         vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
 	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
-	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
+	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer"))),
+	genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -250,6 +251,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   run_ = iEvent.id().run();
   lumi_ = iEvent.luminosityBlock();
   evt_ = iEvent.id().event();
+
+  std::vector<int> matched_indices;
+	
+  auto key = std::make_tuple(run_, lumi_, evt_);
+  auto it = sigMatchMap_.find(key);
+  if (it != sigMatchMap_.end()) {
+      matched_indices = it->second;
+  }
 
   nPU = 0;
 
@@ -712,7 +721,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    }
    
    // Step 2: Add nearby tracks based on deltaR
-   std::unordered_set<size_t> expanded_indices = selected_indices;  // will include nearby tracks too
+   //std::unordered_set<size_t> expanded_indices = selected_indices;  // will include nearby tracks too
+   std::unordered_set<size_t> expanded_indices(matched_indices.begin(), matched_indices.end());
    
    //for (size_t k = 0; k < deltaR.size(); ++k) {
    //    if (deltaR[k] >= 0.1 and dca[k] >= 0.007 and dca_sig[k] >= 1.0 and cptopv[k] >= 0.9) continue;
@@ -766,14 +776,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    std::cout << "vertices size" << vertices.size() << std::endl;
 
-  // vertexMerge(vertices, 0.7, 2);
+   //vertexMerge(vertices, 0.7, 2);
 
    recoVertices.insert(recoVertices.end(), vertices.begin(), vertices.end());
 
    std::cout << "Recovertices size" << recoVertices.size() << std::endl;
 
-   //std::vector<TransientVertex> newVTXs = recoVertices;
-   std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
+   std::vector<TransientVertex> newVTXs = recoVertices;
+   //std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
    vertexMerge(newVTXs, 0.2, 3);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
@@ -1020,6 +1030,56 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
         tree->Branch("SV_z_reco", &SV_z_reco);
         tree->Branch("SV_chi2_reco", &SV_chi2_reco);
 
+        std::ifstream file(genmatch_csv_);
+	if (!file.is_open()) {
+              std::cerr << "Failed to open file: " << genmatch_csv_ << std::endl;
+              return;
+         }
+
+	std::string line;
+	std::getline(file, line);  // Skip header
+	
+	int line_no = 1;
+	while (std::getline(file, line)) {
+	    ++line_no;
+	    if (line.empty()) continue;
+	
+	    std::stringstream ss(line);
+	    std::string run_str, lumi_str, evt_str, sig_str;
+	
+	    // Parse CSV fields (note: will fail if sig_str contains a comma inside quotes)
+	    if (!std::getline(ss, run_str, ',')) continue;
+	    if (!std::getline(ss, lumi_str, ',')) continue;
+	    if (!std::getline(ss, evt_str, ',')) continue;
+	    if (!std::getline(ss, sig_str)) continue;
+	
+	    // Strip potential quotes
+	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '"'), sig_str.end());
+	
+	    // Strip brackets
+	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '['), sig_str.end());
+	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), ']'), sig_str.end());
+	
+	    try {
+	        unsigned int run = std::stoul(run_str);
+	        unsigned int lumi = std::stoul(lumi_str);
+	        unsigned int evt = std::stoul(evt_str);
+	
+	        std::vector<int> indices;
+	        std::stringstream sig_ss(sig_str);
+	        std::string val;
+	        while (std::getline(sig_ss, val, ',')) {
+	            if (!val.empty())
+	                indices.push_back(std::stoi(val));
+	        }
+	
+	        sigMatchMap_[{run, lumi, evt}] = indices;
+	
+	    } catch (const std::exception& e) {
+	        std::cerr << "Failed to parse line " << line_no << ": " << e.what() << "\nLine: " << line << std::endl;
+	    }
+	}
+   	
 }
 
 

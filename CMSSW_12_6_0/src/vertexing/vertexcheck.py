@@ -20,7 +20,7 @@ Infile = TFile(infile, 'READ')
 demo = Infile.Get('demo')
 tree = demo.Get('tree')
 
-match_threshold = 5
+match_threshold = 10
 
 # Initialize counters
 total_GVs = 0
@@ -106,17 +106,17 @@ Infile.Close()
 
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(8, 5))
-plt.hist(min_dists_gnn, bins=100, alpha=0.6, label="GNN", color='red', log=True)
-plt.hist(min_dists_ivf, bins=100, alpha=0.6, label="IVF", color='blue', log=True)
-plt.axvline(match_threshold, color='k', linestyle='--', label=f"Current threshold = {match_threshold}")
-plt.xlabel("Minimum distance between GV and SV [cm]")
-plt.ylabel("Number of GVs (log scale)")
-plt.title("Minimum GV–SV Distance Distribution")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("mindist_svtogv.png")
+#plt.figure(figsize=(8, 5))
+#plt.hist(min_dists_gnn, bins=100, alpha=0.6, label="Genmatch", color='red', log=True)
+#plt.hist(min_dists_ivf, bins=100, alpha=0.6, label="IVF", color='blue', log=True)
+#plt.axvline(match_threshold, color='k', linestyle='--', label=f"Current threshold = {match_threshold}")
+#plt.xlabel("Minimum distance between GV and SV [cm]")
+#plt.ylabel("Number of GVs (log scale)")
+#plt.title("Minimum GV–SV Distance Distribution")
+#plt.legend()
+#plt.grid(True)
+#plt.tight_layout()
+#plt.savefig("mindist_gentracksvertextogv_1407.png")
 
 
 
