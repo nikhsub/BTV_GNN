@@ -1,0 +1,80 @@
+# Sample Configuration for Preprocessing Scripts
+# Copy and modify this file for your specific needs
+
+track_features:
+  features:
+    - trk_eta
+    - trk_phi
+    - trk_ip2d
+    - trk_ip3d
+    - trk_ip2dsig
+    - trk_ip3dsig
+    - trk_p
+    - trk_pt
+    - trk_nValid
+    - trk_nValidPixel
+    - trk_nValidStrip
+    - trk_charge
+  
+  dummy_values:
+    trk_eta: -999.0
+    trk_phi: -999.0
+    trk_ip2d: -999.0
+    trk_ip3d: -999.0
+    trk_ip2dsig: -999.0
+    trk_ip3dsig: -999.0
+    trk_p: -999.0
+    trk_pt: -999.0
+    trk_nValid: -1
+    trk_nValidPixel: -1
+    trk_nValidStrip: -1
+    trk_charge: -3
+  
+  dtype_map:
+    trk_eta: float32
+    trk_phi: float32
+    trk_ip2d: float32
+    trk_ip3d: float32
+    trk_ip2dsig: float32
+    trk_ip3dsig: float32
+    trk_p: float32
+    trk_pt: float32
+    trk_nValid: int16
+    trk_nValidPixel: int16
+    trk_nValidStrip: int16
+    trk_charge: int8
+
+edge_filters:
+  # Training filters (strict)
+  train_cptopv_max: 15.0
+  train_dca_max: 0.125
+  train_dca_sig_max: 30.0
+  train_pvtoPCA_1_max: 15.0
+  train_pvtoPCA_2_max: 15.0
+  train_dotprod_1_min: 0.75
+  train_dotprod_2_min: 0.75
+  train_pair_invmass_max: 5.0
+  train_pair_mom_max: 100.0
+  
+  # Validation filters (moderate)
+  val_cptopv_max: 50.0
+  val_pvtoPCA_1_max: 50.0
+  val_pvtoPCA_2_max: 50.0
+  val_dotprod_1_min: 0.50
+  val_dotprod_2_min: 0.50
+  val_pair_invmass_max: 10.0
+  
+  # Test filters (loose)
+  test_cptopv_max: 100.0
+  test_pair_mom_max: 100.0
+
+processing:
+  batch_size: 100
+  min_tracks: 2
+  min_signal_tracks: 3
+  default_hadron_weight: 1.0
+  pickle_protocol: 4
+  
+  # Memory management
+  gc_frequency: 10        # Run garbage collection every N batches
+  max_memory_gb: 8.0      # Maximum memory usage before forcing cleanup
