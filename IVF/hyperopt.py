@@ -17,7 +17,7 @@ from sklearn.preprocessing import StandardScaler
 import os
 import torch.nn.functional as F
 import math
-from GATModel import *
+from GCNModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
@@ -82,7 +82,7 @@ def train(model, train_loader, optimizer, device, epoch, alpha, gamma, bce_loss=
         num_nodes = data.x.size(0)
         batch_had_weight = 1
 
-        node_embeds1, preds1, _,_,_ = model(data.x, data.edge_index, data.edge_attr)
+        node_embeds1, preds1,*_ = model(data.x, data.edge_index, data.edge_attr)
         node_loss = focal_loss(preds1, data.y.float().unsqueeze(1), gamma=gamma, alpha=alpha)
         
         #node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
@@ -128,7 +128,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     for i, data in enumerate(val_graphs):
         with torch.no_grad():
             data = data.to(device)
-            _, logits, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
+            _, logits, *_ = model(data.x, data.edge_index, data.edge_attr)
             preds = torch.sigmoid(logits)
             preds = preds.squeeze()
             siginds = data.siginds.cpu().numpy()
@@ -163,7 +163,7 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
 
 def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     # Hyperparameter suggestions
-    hidden_dim = trial.suggest_categorical("hidden_dim", [32, 48, 64, 96, 128])
+    hidden_dim = trial.suggest_categorical("hidden_dim", [32, 48, 64])
     learning_rate = trial.suggest_loguniform("lr", 1e-5, 1e-1)
     gamma = trial.suggest_uniform("gamma", 2.0, 3.0)
     alpha = trial.suggest_uniform("alpha", 0.90, 0.99)
@@ -239,7 +239,7 @@ if __name__ == "__main__":
             val_evts = pickle.load(f)
     
     train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
-    val_evts   = val_evts[0:1500]
+    #val_evts   = val_evts[0:1500]
     
     train_len = int(1 * len(train_hads))
     train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
@@ -261,7 +261,7 @@ if __name__ == "__main__":
 
     print(f"Best hyperparameters saved")
     
-    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=len(edge_features), heads=4, dropout=0.2).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=study.best_params["hidden_dim"], edge_dim=len(edge_features)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=study.best_params["lr"])
 
     best_metric = 0.0  # Track the best validation AUC

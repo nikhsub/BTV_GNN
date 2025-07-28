@@ -88,25 +88,25 @@ std::optional<std::tuple<float, float, float>> DemoAnalyzer::isAncestor(const re
 
 int DemoAnalyzer::checkPDG(int abs_pdg)
 {
-	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
-				       5122, 5112, 5212, 5222, 5132, 5232, 5142, 5332, 5142, 5242, 5342, 5512, 5532, 5542, 5554}; //Bottom Baryons
+    // Extract the hundreds and thousands digit
+    int hundreds = (abs_pdg / 100) % 10;
+    int thousands = (abs_pdg / 1000) % 10;
 
-	std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
-                                     4122, 4222, 4212, 4112, 4232, 4132, 4332, 4412, 4422, 4432, 4444}; //Charmed Baryons
-
-	if(std::find(pdgList_B.begin(), pdgList_B.end(), abs_pdg) != pdgList_B.end()){
-		return 1;
-	}
-	else if(std::find(pdgList_D.begin(), pdgList_D.end(), abs_pdg) != pdgList_D.end()){
-	       	return 2;
-	}
-	else{
-		return 0;
-	}
-
+    // Check if either hundreds or thousands digit is 3 → bottom hadrons
+    if (hundreds == 5 || thousands == 5) {
+        return 1;
+    }
+    // Check if either hundreds or thousands digit is 4 → charm hadrons
+    else if (hundreds == 4 || thousands == 4) {
+        return 2;
+    }
+    // Otherwise, return 0
+    else {
+        return 0;
+    }
 }
 
-bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds)
+bool DemoAnalyzer::hasDescendantWithDigit(const reco::Candidate* particle, int digit)
 {
     // Base case: If the particle is null, return false
     if (!particle) {
@@ -116,14 +116,19 @@ bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const st
     // Loop over all daughters
     for (size_t i = 0; i < particle->numberOfDaughters(); i++) {
         const reco::Candidate* daughter = particle->daughter(i);
-        
-        // Check if the current daughter is in the D hadron list
-        if (daughter && std::find(pdgIds.begin(), pdgIds.end(), daughter->pdgId()) != pdgIds.end()) {
-            return true; // Found a D hadron anywhere in the decay chain
-        }
+	
+	int abs_pdg = std::abs(daughter->pdgId());
+
+        int hundreds = (abs_pdg / 100) % 10;
+    	int thousands = (abs_pdg / 1000) % 10;
+    	
+    	// Check if either matches the target digit
+    	if (hundreds == digit || thousands == digit) {
+    	    return true;
+    	}
 
         // Recursively check deeper in the decay chain
-        if (hasDescendantWithId(daughter, pdgIds)) {
+        if (hasDescendantWithDigit(daughter, digit)) {
             return true;
         }
     }
@@ -134,11 +139,12 @@ bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const st
 bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
 
    reco::Vertex tmpvtx(tVTX);
-   return (tVTX.isValid() &&
-    !tmpvtx.isFake() &&
-    (tmpvtx.nTracks(vtxweight_)>1) &&
-    (tmpvtx.normalizedChi2()>0) &&
-    (tmpvtx.normalizedChi2()<10));
+   //return (tVTX.isValid() &&
+   // !tmpvtx.isFake() &&
+   // (tmpvtx.nTracks(vtxweight_)>1) &&
+   // (tmpvtx.normalizedChi2()>0) &&
+   // (tmpvtx.normalizedChi2()<10));
+   return tVTX.isValid();
 }
 
 std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::TransientTrack> &Tracks, std::vector<TransientVertex> &VTXs){
@@ -164,8 +170,7 @@ std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::Tr
       
       if(selTrks.size()>=2){
           TransientVertex newsv = theAVF.vertex(selTrks, ssv);
-          //if(isGoodVtx(newsv)) 
-          newVTXs.push_back(newsv);
+          if(isGoodVtx(newsv))  newVTXs.push_back(newsv);
       }
   
   }
@@ -756,7 +761,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
           std::vector<TransientVertex> tmp_vertices = vtxmaker_.vertices(cluster->tracks);
           for (std::vector<TransientVertex>::iterator v = tmp_vertices.begin(); v != tmp_vertices.end(); ++v) {
            reco::Vertex tmpvtx(*v);
-	   recoVertices.push_back(*v);
+	   if(v->isValid()) recoVertices.push_back(*v);
            //if(v->isValid() &&
            //   !tmpvtx.isFake() &&
            //   (tmpvtx.nTracks(vtxweight_)>0.5) &&
@@ -769,23 +774,23 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::cout << "Recovertices size" << recoVertices.size() << std::endl;
    
    std::vector<TransientVertex> vertices = vtxmaker_.vertices(t_trks_SV);
-   //for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
-   //    if(!isGoodVtx(*isv)) isv = vertices.erase(isv)-1;
+   for(std::vector<TransientVertex>::iterator isv = vertices.begin(); isv!=vertices.end(); ++isv){
+       if(!isGoodVtx(*isv)) isv = vertices.erase(isv)-1;
 
-   //}
+   }
 
    std::cout << "vertices size" << vertices.size() << std::endl;
 
-   //vertexMerge(vertices, 0.7, 2);
-
    recoVertices.insert(recoVertices.end(), vertices.begin(), vertices.end());
+
+   vertexMerge(recoVertices, 0.7, 2);
 
    std::cout << "Recovertices size" << recoVertices.size() << std::endl;
 
-   std::vector<TransientVertex> newVTXs = recoVertices;
-   //std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
+   //std::vector<TransientVertex> newVTXs = recoVertices;
+   std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
-   vertexMerge(newVTXs, 0.2, 3);
+   vertexMerge(newVTXs, 0.2, 10);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
 
    int nvtx=0;
@@ -813,11 +818,6 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<int> temp_Daughters_flag;
    std::vector<int> temp_Daughters_flav;
    
-   std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
-                                 4122, 4222, 4212, 4112, 4232, 4132, 4332, 4412, 4422, 4432, 4444}; //Charmed Baryons   
-
-   std::unordered_set<int> pdgSet_D(pdgList_D.begin(), pdgList_D.end());
-
    
    for(size_t i=0; i< merged->size();i++)
    { //prune loop
@@ -837,7 +837,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         	const Candidate* dau = prun_part->daughter(i);
 		if (!dau) continue; // Safety check
                 int dau_pdg = std::abs(dau->pdgId());
-                if (dau->charge() != 0 && pdgSet_D.count(dau_pdg) == 0) {
+                if (dau->charge() != 0 && checkPDG(dau_pdg)!=2) {
                     n_charged_nonD_daughters++;
                 }
             }
@@ -954,7 +954,7 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 
 	tree->Branch("run", &run_, "run/i");
    	tree->Branch("lumi", &lumi_, "lumi/i");
-   	tree->Branch("evt", &evt_, "evt/l");
+   	tree->Branch("evt", &evt_);
 	tree->Branch("nPU", &nPU);
 	tree->Branch("nHadrons", &nHadrons);
 	tree->Branch("Hadron_pt", &Hadron_pt);
