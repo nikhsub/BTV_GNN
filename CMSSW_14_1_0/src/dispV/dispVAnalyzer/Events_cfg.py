@@ -14,18 +14,19 @@ process.load('RecoTracker.Configuration.RecoTracker_cff')
 #process.load('Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff')
 process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3000))
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(10000))
 
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
           seedMax3DIPValue =  cms.double(9999.0),
-          seedMin3DIPSignificance = cms.double(1.2),
-          seedMin3DIPValue = cms.double(0.005),
+          seedMin3DIPSignificance = cms.double(1.2),    # 1.2 sigma    
+          seedMin3DIPValue = cms.double(0.005),         # 50um
+          
           clusterMaxDistance = cms.double(0.05),
           clusterMaxSignificance = cms.double(4.5),
           distanceRatio = cms.double(20.0),
           clusterMinAngleCosine = cms.double(0.5),
-          maxTimeSignificance = cms.double(3.5),
+          maxTimeSignificance = cms.double(99999), #3.5 from Nik
 )
 
 
@@ -48,28 +49,75 @@ process.mergedGenParticles = cms.EDProducer("MergedGenParticleProducer",
 
 
 process.demo = cms.EDAnalyzer('DemoAnalyzer',
-packed = cms.InputTag("packedGenParticles"),
-pruned = cms.InputTag("prunedGenParticles"),
-merged = cms.InputTag("mergedGenParticles"),
-tracks = cms.untracked.InputTag('packedPFCandidates'),
-jets = cms.untracked.InputTag('slimmedJets'),
-primaryVertices = cms.untracked.InputTag('offlineSlimmedPrimaryVertices'),
-secVertices = cms.untracked.InputTag('slimmedSecondaryVertices'),
-losttracks = cms.untracked.InputTag('lostTracks', '', "PAT"),
-TrackPtCut = cms.untracked.double(0.5),
-addPileupInfo = cms.untracked.InputTag('slimmedAddPileupInfo'),
-vtxweight = cms.untracked.double(0.5),
-vertexfitter = cms.untracked.PSet(
-         finder = cms.string('avr')
-     ),
-TrackPredCut = cms.untracked.double(0.400),
-clusterizer = ClusteringParam,
-model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_out48_hadtrain_2606.onnx"),
-genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/data/genmatch_info_1407.csv")
-)
+    packed = cms.InputTag("packedGenParticles"),
+    pruned = cms.InputTag("prunedGenParticles"),
+    beamspot = cms.InputTag('offlineBeamSpot'), # GC
+    merged = cms.InputTag("mergedGenParticles"),
+    tracks = cms.untracked.InputTag('packedPFCandidates'),
+    jets = cms.untracked.InputTag('slimmedJets'),
+    primaryVertices = cms.untracked.InputTag('offlineSlimmedPrimaryVertices'),
+    secVertices = cms.untracked.InputTag('slimmedSecondaryVertices'),
+    losttracks = cms.untracked.InputTag('lostTracks', '', "PAT"),
+    TrackPtCut = cms.untracked.double(0.5),
+    addPileupInfo = cms.untracked.InputTag('slimmedAddPileupInfo'),
+    vtxweight = cms.untracked.double(0.5),
+    vertexfitter = cms.untracked.PSet(
+             finder = cms.string('avr')
+         ),
 
+
+    TrackPredCut = cms.untracked.double(0.2), # set to 0 should be IVF normal reconstruction?
+    clusterizer = ClusteringParam,
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_out48_hadtrain_2606.onnx"),
+    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/data/geninfo_ntup_ttbarhad_2807.csv")
+)
 process.TFileService = cms.Service("TFileService",
         fileName = cms.string("ttbar_hadronic_1507_genvertexing.root"),
 )
 
-process.p = cms.Path(process.mergedGenParticles+process.demo)
+
+#inclusiveVertexFinder  = cms.EDProducer("InclusiveVertexFinder",
+#       beamSpot = cms.InputTag("offlineBeamSpot"),
+#       primaryVertices = cms.InputTag('offlineSlimmedPrimaryVertices'),
+#       tracks = cms.InputTag("generalTracks"),
+#       minHits = cms.uint32(8),
+#       maximumLongitudinalImpactParameter = cms.double(0.3),
+#       minPt = cms.double(0.8),
+#       maxNTracks = cms.uint32(30),
+#
+#       clusterizer = cms.PSet(
+#           seedMax3DIPSignificance = cms.double(9999.),
+#           seedMax3DIPValue = cms.double(9999.),
+#           seedMin3DIPSignificance = cms.double(1.2),
+#           seedMin3DIPValue = cms.double(0.005),
+#           clusterMaxDistance = cms.double(0.05), #500um
+#           clusterMaxSignificance = cms.double(4.5), #4.5 sigma
+#           distanceRatio = cms.double(20), # was cluster scale = 1 / density factor =0.05 
+#           clusterMinAngleCosine = cms.double(0.5), # only forward decays
+#       ),
+#
+#       vertexMinAngleCosine = cms.double(0.95), # scalar prod direction of tracks and flight dir
+#       vertexMinDLen2DSig = cms.double(2.5), #2.5 sigma
+#       vertexMinDLenSig = cms.double(0.5), #0.5 sigma
+#       fitterSigmacut =  cms.double(3),
+#       fitterTini = cms.double(256),
+#       fitterRatio = cms.double(0.25),
+#       useDirectVertexFitter = cms.bool(True),
+#       useVertexReco  = cms.bool(True),
+#       vertexReco = cms.PSet(
+#               finder = cms.string('avr'),
+#               primcut = cms.double(1.0),
+#               seccut = cms.double(3),
+#               smoothing = cms.bool(True)
+#       )
+#
+
+#)
+
+
+process.p = cms.Path(process.mergedGenParticles + process.demo)
+#process.p = cms.Path(process.inclusiveVertexFinder 
+
+#+ producer.IVF
+
+#)

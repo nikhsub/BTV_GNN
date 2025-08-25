@@ -102,8 +102,6 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<TransientVertex> TrackVertexRefit(std::vector<reco::TransientTrack> &, std::vector<TransientVertex> &);
       void vertexMerge(std::vector<TransientVertex> &, double, double );
       float sigmoid(float x);
-
-
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
       edm::EDGetTokenT<pat::PackedCandidateCollection> TrackCollT_;
@@ -111,6 +109,7 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       edm::EDGetTokenT<edm::View<reco::VertexCompositePtrCandidate>> SVCollT_;
       edm::EDGetTokenT<pat::PackedCandidateCollection> LostTrackCollT_;
       edm::EDGetTokenT<edm::View<reco::Jet> > jet_collT_;
+      edm::EDGetTokenT<reco::BeamSpot> beamspotToken_;
       edm::EDGetTokenT<edm::View<reco::GenParticle> > prunedGenToken_;
       edm::EDGetTokenT<edm::View<pat::PackedGenParticle> > packedGenToken_;
       edm::EDGetTokenT<edm::View<reco::GenParticle> > mergedGenToken_;
@@ -138,13 +137,19 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> Hadron_GVx;
       std::vector<float> Hadron_GVy;
       std::vector<float> Hadron_GVz;
+      std::vector<int> Hadron_SVIdx;
+      std::vector<float> Hadron_SVDistance;
+      
       std::vector<int> nHadrons;
       std::vector<int> nGV;
       std::vector<int> nGV_B;
+      std::vector<int> nGV_Tau;
+      std::vector<int> nGV_S;
       std::vector<int> nGV_D;
       std::vector<int> GV_flag;
       std::vector<int> nDaughters;
       std::vector<int> nDaughters_B;
+      std::vector<int> nDaughters_S;
       std::vector<int> nDaughters_D;
       std::vector<int> Daughters_flag;
       std::vector<int> Daughters_flav;
@@ -156,6 +161,8 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<int> ntrks;
       std::vector<float> trk_ip2d;
       std::vector<float> trk_ip3d;
+      std::vector<float> trk_ipz;
+      std::vector<float> trk_ipzsig;
       std::vector<float> trk_ip2dsig;
       std::vector<float> trk_ip3dsig;
       std::vector<float> trk_p;
@@ -194,8 +201,17 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SV_mass;
       std::vector<int> SV_ntrks;
       std::vector<float> SVtrk_pt;
+      std::vector<int> SVtrk_SVIdx;
       std::vector<float> SVtrk_eta;
       std::vector<float> SVtrk_phi; 
+      std::vector<float> SVtrk_ipz; 
+      std::vector<float> SVtrk_ipzsig; 
+      std::vector<float> SVtrk_ipxy; 
+      std::vector<float> SVtrk_ipxysig; 
+      std::vector<float> SVtrk_ip3d; 
+      std::vector<float> SVtrk_ip3dsig; 
+      std::vector<float> SVrecoTrk_ip3d;
+      std::vector<float> SVrecoTrk_ip2d;
       
       std::vector<float> preds;
       std::vector<float> cut;
@@ -204,10 +220,18 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SV_x_reco;
       std::vector<float> SV_y_reco;
       std::vector<float> SV_z_reco;
+      std::vector<int> SV_reco_nTracks;
       std::vector<float> SV_chi2_reco;
+      std::vector<int> SVrecoTrk_SVrecoIdx;
+      std::vector<float> SVrecoTrk_pt;
+      std::vector<float> SVrecoTrk_eta;
+      std::vector<float> SVrecoTrk_phi;
+      std::vector<int> Hadron_SVRecoIdx;
+      std::vector<float> Hadron_SVRecoDistance;
 	
 
      
 };
 
 #endif // DemoAnalyzer_h
+
