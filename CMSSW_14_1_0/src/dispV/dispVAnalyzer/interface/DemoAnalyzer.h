@@ -97,7 +97,7 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       //virtual void endJob() override;
       std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
       int checkPDG(int abs_pdg);
-      bool hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds);
+      bool hasDescendantWithDigit(const reco::Candidate* particle, int);
       bool isGoodVtx(TransientVertex &);
       std::vector<TransientVertex> TrackVertexRefit(std::vector<reco::TransientTrack> &, std::vector<TransientVertex> &);
       void vertexMerge(std::vector<TransientVertex> &, double, double );

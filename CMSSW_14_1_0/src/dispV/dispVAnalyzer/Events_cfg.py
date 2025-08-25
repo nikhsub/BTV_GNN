@@ -64,15 +64,13 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     vertexfitter = cms.untracked.PSet(
              finder = cms.string('avr')
          ),
-
-
     TrackPredCut = cms.untracked.double(0.2), # set to 0 should be IVF normal reconstruction?
     clusterizer = ClusteringParam,
     model_path = cms.FileInPath("dispV/dispVAnalyzer/data/focloss_out48_hadtrain_2606.onnx"),
     genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/data/geninfo_ntup_ttbarhad_2807.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbar_hadronic_1507_genvertexing.root"),
+        fileName = cms.string("ttbar_hadronic_2807_genvertexing.root"),
 )
 
 

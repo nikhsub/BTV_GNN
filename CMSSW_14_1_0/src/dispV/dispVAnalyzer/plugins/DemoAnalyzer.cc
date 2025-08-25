@@ -163,6 +163,7 @@ int DemoAnalyzer::checkPDG(int abs_pdg)
 //Return 3 for S hadrons
 //Returns 0 for anything else
 {
+
 	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
 				        5122,   //lambda_b0
                         //5112,   //sigma_b-  // too short  
@@ -219,8 +220,8 @@ int DemoAnalyzer::checkPDG(int abs_pdg)
 	else{
 		return 0;
 	}
-
 }
+
 
 //bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds)
 // not used
@@ -249,14 +250,16 @@ int DemoAnalyzer::checkPDG(int abs_pdg)
 //    return false; // No D hadron found in the decay chain
 //}
 
+
 bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
 
    reco::Vertex tmpvtx(tVTX);
-   return (tVTX.isValid() &&
-    !tmpvtx.isFake() &&
-    (tmpvtx.nTracks(vtxweight_)>1) &&
-    (tmpvtx.normalizedChi2()>0) &&
-    (tmpvtx.normalizedChi2()<10));
+   //return (tVTX.isValid() &&
+   // !tmpvtx.isFake() &&
+   // (tmpvtx.nTracks(vtxweight_)>1) &&
+   // (tmpvtx.normalizedChi2()>0) &&
+   // (tmpvtx.normalizedChi2()<10));
+   return tVTX.isValid();
 }
 
 
@@ -292,8 +295,7 @@ std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::Tr
       
       if(selTrks.size()>=2){
           TransientVertex newsv = theAVF.vertex(selTrks, ssv);
-          //if(isGoodVtx(newsv)) 
-          newVTXs.push_back(newsv);
+          if(isGoodVtx(newsv))  newVTXs.push_back(newsv);
       }
   
   }
@@ -956,6 +958,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
           
           
           for (std::vector<TransientVertex>::iterator v = tmp_vertices.begin(); v != tmp_vertices.end(); ++v) {
+
             reco::Vertex tmpvtx(*v);
             // Compute flight distance significance w.r.t. primary vertex
             // Assume primary vertex is the first vertex in recoVertices
@@ -986,6 +989,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    //std::vector<TransientVertex> newVTXs = recoVertices;
    std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
    //std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+  
    vertexMerge(newVTXs, 0.2, 10);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
 
@@ -1044,6 +1048,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<int> temp_Daughters_flag;
    std::vector<int> temp_Daughters_flav;
    
+
    	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
 				        5122,   //lambda_b0
                         //5112,   //sigma_b-  // too short  
@@ -1091,6 +1096,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::unordered_set<int> pdgSet_S(pdgList_S.begin(), pdgList_S.end());
    std::unordered_set<int> pdgSet_Tau(pdgList_Tau.begin(), pdgList_Tau.end());
 
+
    
    for(size_t i=0; i< merged->size();i++)
    {  //prune loop
@@ -1108,6 +1114,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     // pt and eta requirement are satisfied for the mother
     // pdg of the meson candidate and the mother
 	int hadPDG = checkPDG(std::abs(prun_part->pdgId()));
+
 	//int had_parPDG = checkPDG(std::abs(prun_part->mother(0)->pdgId())); GC not used
     
 	//if (hadPDG == 1) { // B hadron
@@ -1383,7 +1390,7 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 
 	tree->Branch("run", &run_, "run/i");
    	tree->Branch("lumi", &lumi_, "lumi/i");
-   	tree->Branch("evt", &evt_, "evt/l");
+   	tree->Branch("evt", &evt_);
 	tree->Branch("nPU", &nPU);
 	tree->Branch("nHadrons", &nHadrons);                // Hadrons of GenVertices             
 	tree->Branch("Hadron_pt", &Hadron_pt);              // Hadrons of GenVertices

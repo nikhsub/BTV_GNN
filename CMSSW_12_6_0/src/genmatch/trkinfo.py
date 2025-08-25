@@ -15,6 +15,7 @@ parser.add_argument("-o", "--out", default="testfile", help="Name of output ROOT
 parser.add_argument("-s", "--start", type=int, help="Start index for events")
 parser.add_argument("-e", "--end", type=int, help="End index for events")
 parser.add_argument("-lpt", "--lowpt", default=False, action="store_true", help="Apply low pt cut?")
+parser.add_argument("-csv", "--write_csv", default=False, action="store_true", help="Write genmatch info to file")
 
 args = parser.parse_args()
 
@@ -41,13 +42,13 @@ sig_flav      = std.vector('int')()
 
 run = std.vector('int')()
 lumi = std.vector('int')()
-event = std.vector('int')()
+event = std.vector('ULong64_t')()
 
 bkg_ind       = std.vector('int')()
 bkg_flag      = std.vector('int')()
 
-#delr     = std.vector('double')()
-#ptrat     = std.vector('double')()
+delr     = std.vector('double')()
+ptrat     = std.vector('double')()
 
 SVtrk_ind     = std.vector('int')()
 
@@ -92,7 +93,7 @@ branches = {
     "missed_sig": missed_sig, "trk_1": trk_1, "trk_2": trk_2, "deltaR": deltaR,
     "dca": dca, "dca_sig": dca_sig, "cptopv": cptopv, "pvtoPCA_1": pvtoPCA_1, "pvtoPCA_2": pvtoPCA_2,
     "dotprod_1": dotprod_1, "dotprod_2": dotprod_2, "pair_mom": pair_mom, "pair_invmass": pair_invmass,
-    "preds": preds
+    "preds": preds, "delr": delr, "ptrat": ptrat
 }
 
 for name, branch in branches.items():
@@ -113,6 +114,11 @@ def delta_R(eta1, phi1, eta2, phi2):
     dphi = np.abs(phi1[:, None] - phi2)
     dphi[dphi > np.pi] -= 2 * np.pi  # Ensure dphi is in [-π, π]
     return np.sqrt(deta**2 + dphi**2)
+
+def delta_phi(phi1, phi2):
+    """Compute Δφ taking into account the periodicity of the angle."""
+    dphi = phi1 - phi2
+    return np.mod(dphi + np.pi, 2 * np.pi) - np.pi
 
 for i, evt in enumerate(tree):
     if i < start_index:
@@ -174,7 +180,7 @@ for i, evt in enumerate(tree):
         
         pt_diff = np.abs(alltrk_data[:, 0][:, None] - svtrk_data[:, 0])
         eta_diff = np.abs(alltrk_data[:, 1][:, None] - svtrk_data[:, 1])
-        phi_diff = np.abs(alltrk_data[:, 2][:, None] - svtrk_data[:, 2])
+        phi_diff = np.abs(delta_phi(alltrk_data[:, 2][:, None], svtrk_data[:, 2]))
         
         best_indices = np.argmin(pt_diff + eta_diff + phi_diff, axis=0)
         svtrkinds = set(best_indices)
@@ -200,6 +206,14 @@ for i, evt in enumerate(tree):
     
     
     min_deltaR_indices = np.argmin(delta_R_matrix, axis=0)
+
+    min_deltaRs = delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])]
+    pt_ratios   = trk_pt_array[min_deltaR_indices] / d_pt_array
+
+    delr.assign(min_deltaRs.tolist())
+    ptrat.assign(pt_ratios.tolist())
+    
+
     sig_mask = valid_tracks[min_deltaR_indices] & \
                (delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])] < 0.02) & \
                (0.8 <= (trk_pt_array[min_deltaR_indices] / d_pt_array)) & \
@@ -233,12 +247,12 @@ for i, evt in enumerate(tree):
 Outfile.WriteTObject(outtree, "tree")
 Outfile.Close()
 
-
-with open("genmatch_info.csv", "w", newline="") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(["run", "lumi", "event", "sig_ind"])
-
-    for i in range(len(run_list)):
-        sig_str = "[" + ",".join(str(x) for x in sig_ind_list[i]) + "]"
-        writer.writerow([run_list[i], lumi_list[i], evt_list[i], sig_str])
+if(args.write_csv):
+    with open("geninfo_"+args.out+".csv", "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["run", "lumi", "event", "sig_ind"])
+    
+        for i in range(len(run_list)):
+            sig_str = "[" + ",".join(str(x) for x in sig_ind_list[i]) + "]"
+            writer.writerow([run_list[i], lumi_list[i], evt_list[i], sig_str])
 
