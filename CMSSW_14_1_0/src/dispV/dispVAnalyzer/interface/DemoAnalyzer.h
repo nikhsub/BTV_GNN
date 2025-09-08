@@ -39,6 +39,7 @@
 #include "RecoVertex/ConfigurableVertexReco/interface/ConfigurableVertexReconstructor.h"
 #include "RecoVertex/AdaptiveVertexFinder/interface/TracksClusteringFromDisplacedSeed.h"
 #include "RecoVertex/AdaptiveVertexFinder/interface/VertexMerging.h"
+#include "RecoVertex/AdaptiveVertexFinder/interface/TrackVertexArbitration.h"
 #include "RecoVertex/AdaptiveVertexFit/interface/AdaptiveVertexFitter.h"
 #include "RecoVertex/VertexTools/interface/SharedTracks.h"
 #include "RecoVertex/VertexPrimitives/interface/VertexState.h"
@@ -47,6 +48,7 @@
 #include "RecoVertex/KalmanVertexFit/interface/KalmanVertexUpdator.h"
 #include "RecoVertex/KalmanVertexFit/interface/KalmanVertexTrackCompatibilityEstimator.h"
 #include "RecoVertex/KalmanVertexFit/interface/KalmanVertexSmoother.h"
+#include "TrackingTools/GeomPropagators/interface/AnalyticalImpactPointExtrapolator.h"
 
 //TFile Service
 
@@ -74,6 +76,7 @@
 #include "TrackingTools/IPTools/interface/IPTools.h"
 
 #include "DataFormats/GeometryCommonDetAlgo/interface/Measurement1D.h"
+#include "DataFormats/Math/interface/deltaPhi.h"
 
 //ONNX
 #include "PhysicsTools/ONNXRuntime/interface/ONNXRuntime.h"
@@ -101,6 +104,7 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       bool isGoodVtx(TransientVertex &);
       std::vector<TransientVertex> TrackVertexRefit(std::vector<reco::TransientTrack> &, std::vector<TransientVertex> &);
       void vertexMerge(std::vector<TransientVertex> &, double, double );
+      std::vector<TransientVertex> TrackVertexArbitrator(const reco::Vertex&, const edm::Handle<reco::BeamSpot>&, const::std::vector<TransientVertex>&, std::vector<reco::TransientTrack>&, double, double, double, double, double, double, double, double, int, double, int);
       float sigmoid(float x);
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
@@ -120,9 +124,9 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
       double vtxweight_;
       std::unique_ptr<TracksClusteringFromDisplacedSeed> clusterizer;
-      std::string genmatch_csv_;
+      //std::string genmatch_csv_;
 
-      std::map<std::tuple<unsigned int, unsigned int, unsigned int>, std::vector<int>> sigMatchMap_;
+      //std::map<std::tuple<unsigned int, unsigned int, unsigned int>, std::vector<int>> sigMatchMap_;
 
       unsigned int run_;
       unsigned int lumi_;

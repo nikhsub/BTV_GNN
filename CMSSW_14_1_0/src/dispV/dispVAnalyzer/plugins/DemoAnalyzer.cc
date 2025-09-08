@@ -72,7 +72,7 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
 	SVCollT_ (consumes<edm::View<reco::VertexCompositePtrCandidate>>(iConfig.getUntrackedParameter<edm::InputTag>("secVertices"))),
   	LostTrackCollT_ (consumes<pat::PackedCandidateCollection>(iConfig.getUntrackedParameter<edm::InputTag>("losttracks"))),
 	jet_collT_ (consumes<edm::View<reco::Jet> >(iConfig.getUntrackedParameter<edm::InputTag>("jets"))),
-    //beamspotToken_ (consumes<reco::BeamSpot>(iConfig.getUntrackedParameter<edm::InputTag>("beamspot"))),
+        beamspotToken_ (consumes<reco::BeamSpot>(iConfig.getUntrackedParameter<edm::InputTag>("beamspot"))),
 	prunedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("pruned"))),
   	packedGenToken_(consumes<edm::View<pat::PackedGenParticle> >(iConfig.getParameter<edm::InputTag>("packed"))),
 	mergedGenToken_(consumes<edm::View<reco::GenParticle> >(iConfig.getParameter<edm::InputTag>("merged"))),
@@ -82,8 +82,8 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
     vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
 	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
-	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer"))),
-	genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
+	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
+	//genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -357,6 +357,143 @@ void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFra
     } 
 }
 
+std::vector<TransientVertex>
+DemoAnalyzer::TrackVertexArbitrator(const reco::Vertex& pv,
+                           const edm::Handle<reco::BeamSpot>& bsH,
+                           const std::vector<TransientVertex>& seedSVs,
+                           std::vector<reco::TransientTrack>& allTTs,
+                           // arbitration cuts
+                           double dRCut,
+                           double distCut,
+                           double sigCut,
+                           double dLenFraction,
+                           double fitterSigmacut,
+                           double fitterTini,
+                           double fitterRatio,
+                           double maxTimeSig,
+                           // track quality cuts
+                           int trackMinLayers,
+                           double trackMinPt,
+                           int trackMinPixels) {
+  std::vector<TransientVertex> out;
+  VertexDistance3D vdist;
+  GlobalPoint ppv(pv.position().x(), pv.position().y(), pv.position().z());
+
+  AdaptiveVertexFitter avf(
+      GeometricAnnealing(fitterSigmacut, fitterTini, fitterRatio),
+      DefaultLinearizationPointFinder(),
+      KalmanVertexUpdator<5>(),
+      KalmanVertexTrackCompatibilityEstimator<5>(),
+      KalmanVertexSmoother());
+
+  double dR2cut = dRCut * dRCut;
+
+  for (auto const& sv : seedSVs) {
+    if (!sv.isValid()) continue;
+
+    GlobalPoint ssv(sv.position().x(), sv.position().y(), sv.position().z());
+    GlobalVector flightDir = ssv - ppv;
+
+    Measurement1D dlen = vdist.distance(
+    pv,
+    VertexState(GlobalPoint(sv.position().x(),
+                            sv.position().y(),
+                            sv.position().z()),
+                sv.positionError()));
+
+    const auto& svTracks = sv.originalTracks();
+    std::vector<reco::TransientTrack> selTracks;
+    selTracks.reserve(svTracks.size());
+
+    std::unordered_map<size_t, Measurement1D> cachedIP;
+
+    for (size_t i = 0; i < allTTs.size(); ++i) {
+      reco::TransientTrack& tt = allTTs[i];
+      if (!tt.isValid()) continue;
+
+      // === Track quality cuts ===
+      if (tt.track().hitPattern().trackerLayersWithMeasurement() < trackMinLayers) continue;
+      if (tt.track().pt() < trackMinPt) continue;
+      if (tt.track().hitPattern().numberOfValidPixelHits() < trackMinPixels) continue;
+
+      // === Membership check using (pt, eta, phi) match ===
+      bool isMember = false;
+      for (const auto& t0 : svTracks) {
+        double dpt  = std::abs(tt.track().pt()  - t0.track().pt());
+        double deta = std::abs(tt.track().eta() - t0.track().eta());
+        double dphi = std::abs(reco::deltaPhi(tt.track().phi(), t0.track().phi()));
+        if (dpt < 1e-3 && deta < 1e-3 && dphi < 1e-3) {
+          isMember = true;
+          break;
+        }
+      }
+
+      tt.setBeamSpot(*bsH);
+
+      Measurement1D ipv;
+      if (cachedIP.count(i)) {
+        ipv = cachedIP[i];
+      } else {
+        auto ipvp = IPTools::absoluteImpactParameter3D(tt, pv);
+        cachedIP[i] = ipvp.second;
+        ipv = ipvp.second;
+      }
+
+      AnalyticalImpactPointExtrapolator extrap(tt.field());
+      TrajectoryStateOnSurface tsos =
+       extrap.extrapolate(tt.impactPointState(),
+                          GlobalPoint(sv.position().x(),
+                                      sv.position().y(),
+                                      sv.position().z()));
+
+      if (!tsos.isValid()) continue;
+
+      GlobalPoint refPoint = tsos.globalPosition();
+      GlobalError refErr = tsos.cartesianError().position();
+
+      Measurement1D isv = vdist.distance(
+      VertexState(GlobalPoint(sv.position().x(),
+                              sv.position().y(),
+                              sv.position().z()),
+                  sv.positionError()),
+      VertexState(refPoint, refErr));
+
+      float dR2 = Geom::deltaR2(flightDir, tt.track());
+
+      double timeSig = 0.;
+      if (edm::isFinite(tt.timeExt())) {
+        double tErr = std::sqrt(std::pow(tt.dtErrorExt(), 2) + sv.positionError().cxx());
+        timeSig = std::abs(tt.timeExt() - sv.time()) / tErr;
+      }
+
+      // === Arbitration decision ===
+      if (isMember ||
+          (isv.significance() < sigCut &&
+           isv.value() < distCut &&
+           isv.value() < dlen.value() * dLenFraction &&
+           timeSig < maxTimeSig)) {
+        if ((isv.value() < ipv.value()) &&
+            isv.value() < distCut &&
+            isv.value() < dlen.value() * dLenFraction &&
+            dR2 < dR2cut &&
+            timeSig < maxTimeSig) {
+          selTracks.push_back(tt);
+        }
+      }
+    }
+
+    if (selTracks.size() >= 2) {
+      TransientVertex tv = avf.vertex(selTracks, ssv);
+      if (tv.isValid()) {
+        out.push_back(std::move(tv));
+      }
+    }
+  }
+
+  return out;
+}
+
+
 
 
 
@@ -386,13 +523,13 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   lumi_ = iEvent.luminosityBlock();
   evt_ = iEvent.id().event();
 
-  std::vector<int> matched_indices;
+  //std::vector<int> matched_indices;
 	
-  auto key = std::make_tuple(run_, lumi_, evt_);
-  auto it = sigMatchMap_.find(key);
-  if (it != sigMatchMap_.end()) {
-      matched_indices = it->second;
-  }
+  //auto key = std::make_tuple(run_, lumi_, evt_);
+  //auto it = sigMatchMap_.find(key);
+  //if (it != sigMatchMap_.end()) {
+  //    matched_indices = it->second;
+  //}
 
   nPU = 0;
     //vectors defined in .h
@@ -498,7 +635,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   Handle<PackedCandidateCollection> losttracks;
   Handle<edm::View<reco::Jet> > jet_coll;
   Handle<edm::View<reco::GenParticle> > pruned;
-  //Handle<reco::BeamSpot> beamSpotHandle;
+  Handle<reco::BeamSpot> beamSpotHandle;
   Handle<edm::View<pat::PackedGenParticle> > packed;
   Handle<edm::View<reco::GenParticle> > merged;
   Handle<reco::VertexCollection> pvHandle;
@@ -516,7 +653,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   iEvent.getByToken(mergedGenToken_, merged);
   iEvent.getByToken(PVCollT_, pvHandle);
   iEvent.getByToken(SVCollT_, svHandle);
-  //iEvent.getByToken(beamspotToken_, beamSpotHandle);
+  iEvent.getByToken(beamspotToken_, beamSpotHandle);
 
   //std::cout<<"Merged size:"<<merged->size()<<std::endl;
   //std::cout<<"Packed size:"<<packed->size()<<std::endl;
@@ -980,15 +1117,37 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
     vertexMerge(recoVertices, 0.7, 2);
 
-// Track Arbitration needs to be done here
 
-    //auto recoVertices = arbitrator.trackVertexArbitrator(beamSpot, pv, selectedTracks, theSecVertexColl);
-    //  Construct the arbitrator
-    //TrackVertexArbitration<reco::Vertex> arbitrator(paramsTrackArbitrator);
-    // starting from all the tracks
-   //std::vector<TransientVertex> newVTXs = recoVertices;
-   std::vector<TransientVertex> newVTXs = TrackVertexRefit(t_trks_SV, recoVertices);
-   //std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+    double dRCut              = 0.4;
+    double distCut            = 0.04;
+    double sigCut             = 5.0; 
+    double dLenFraction       = 0.333; 
+    double fitterSigmacut     = 3.0; 
+    double fitterTini         = 256.0; 
+    double fitterRatio        = 0.25; 
+    double maxTimeSig         = 3.0;
+    int    trackMinLayers     = 4;
+    double trackMinPt         = 0.4;
+    int    trackMinPixels     = 1;
+	
+    std::vector<TransientVertex> newVTXs = TrackVertexArbitrator(
+      pv,
+      beamSpotHandle,
+      recoVertices,
+      t_trks_SV,
+      dRCut,
+      distCut,
+      sigCut,
+      dLenFraction,
+      fitterSigmacut,
+      fitterTini,
+      fitterRatio,
+      maxTimeSig,
+      trackMinLayers,
+      trackMinPt,
+      trackMinPixels
+   );
+
   
    vertexMerge(newVTXs, 0.2, 10);
    std::cout << "newVTXs size" << newVTXs.size() << std::endl;
@@ -1488,55 +1647,55 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("SV_reco_nTracks", &SV_reco_nTracks);
     tree->Branch("SV_chi2_reco", &SV_chi2_reco);
 
-    std::ifstream file(genmatch_csv_);
-	if (!file.is_open()) {
-              std::cerr << "Failed to open file: " << genmatch_csv_ << std::endl;
-              return;
-         }
-
-	std::string line;
-	std::getline(file, line);  // Skip header
-	
-	int line_no = 1;
-	while (std::getline(file, line)) {
-	    ++line_no;
-	    if (line.empty()) continue;
-	
-	    std::stringstream ss(line);
-	    std::string run_str, lumi_str, evt_str, sig_str;
-	
-	    // Parse CSV fields (note: will fail if sig_str contains a comma inside quotes)
-	    if (!std::getline(ss, run_str, ',')) continue;
-	    if (!std::getline(ss, lumi_str, ',')) continue;
-	    if (!std::getline(ss, evt_str, ',')) continue;
-	    if (!std::getline(ss, sig_str)) continue;
-	
-	    // Strip potential quotes
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '"'), sig_str.end());
-	
-	    // Strip brackets
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '['), sig_str.end());
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), ']'), sig_str.end());
-	
-	    try {
-	        unsigned int run = std::stoul(run_str);
-	        unsigned int lumi = std::stoul(lumi_str);
-	        unsigned int evt = std::stoul(evt_str);
-	
-	        std::vector<int> indices;
-	        std::stringstream sig_ss(sig_str);
-	        std::string val;
-	        while (std::getline(sig_ss, val, ',')) {
-	            if (!val.empty())
-	                indices.push_back(std::stoi(val));
-	        }
-	
-	        sigMatchMap_[{run, lumi, evt}] = indices;
-	
-	    } catch (const std::exception& e) {
-	        std::cerr << "Failed to parse line " << line_no << ": " << e.what() << "\nLine: " << line << std::endl;
-	    }
-	}
+//    std::ifstream file(genmatch_csv_);
+//	if (!file.is_open()) {
+//              std::cerr << "Failed to open file: " << genmatch_csv_ << std::endl;
+//              return;
+//         }
+//
+//	std::string line;
+//	std::getline(file, line);  // Skip header
+//	
+//	int line_no = 1;
+//	while (std::getline(file, line)) {
+//	    ++line_no;
+//	    if (line.empty()) continue;
+//	
+//	    std::stringstream ss(line);
+//	    std::string run_str, lumi_str, evt_str, sig_str;
+//	
+//	    // Parse CSV fields (note: will fail if sig_str contains a comma inside quotes)
+//	    if (!std::getline(ss, run_str, ',')) continue;
+//	    if (!std::getline(ss, lumi_str, ',')) continue;
+//	    if (!std::getline(ss, evt_str, ',')) continue;
+//	    if (!std::getline(ss, sig_str)) continue;
+//	
+//	    // Strip potential quotes
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '"'), sig_str.end());
+//	
+//	    // Strip brackets
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '['), sig_str.end());
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), ']'), sig_str.end());
+//	
+//	    try {
+//	        unsigned int run = std::stoul(run_str);
+//	        unsigned int lumi = std::stoul(lumi_str);
+//	        unsigned int evt = std::stoul(evt_str);
+//	
+//	        std::vector<int> indices;
+//	        std::stringstream sig_ss(sig_str);
+//	        std::string val;
+//	        while (std::getline(sig_ss, val, ',')) {
+//	            if (!val.empty())
+//	                indices.push_back(std::stoi(val));
+//	        }
+//	
+//	        sigMatchMap_[{run, lumi, evt}] = indices;
+//	
+//	    } catch (const std::exception& e) {
+//	        std::cerr << "Failed to parse line " << line_no << ": " << e.what() << "\nLine: " << line << std::endl;
+//	    }
+//	}
    	
 }
 
