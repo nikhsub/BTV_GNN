@@ -81,9 +81,10 @@ def train(model, train_loader, optimizer, device, epoch, alpha, gamma, bce_loss=
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
         batch_had_weight = 1
+        
+        node_embeds1, preds1,*_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
 
-        node_embeds1, preds1,*_ = model(data.x, data.edge_index, data.edge_attr)
-        node_loss = focal_loss(preds1, data.y.float().unsqueeze(1), gamma=gamma, alpha=alpha)
+        node_loss = focal_loss(preds1.squeeze(0), data.y.float().unsqueeze(1), gamma=gamma, alpha=alpha)
         
         #node_embeds1, preds1, _, _, _ = model(data.x, data.edge_index, data.edge_attr)
         #loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -128,8 +129,8 @@ def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
     for i, data in enumerate(val_graphs):
         with torch.no_grad():
             data = data.to(device)
-            _, logits, *_ = model(data.x, data.edge_index, data.edge_attr)
-            preds = torch.sigmoid(logits)
+            _, logits, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
+            preds = torch.sigmoid(logits).squeeze(0)
             preds = preds.squeeze()
             siginds = data.siginds.cpu().numpy()
             #labels = np.zeros(len(preds))
@@ -169,18 +170,20 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
     alpha = trial.suggest_uniform("alpha", 0.90, 0.99)
 
     # Initialize model, optimizer, and loss function
-    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=len(edge_features), heads=4, dropout=0.2).to(device)
+    model = GNNModel(indim=len(trk_features), outdim=hidden_dim, edge_dim=len(edge_features)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     best_metric = 0
     patience_counter = 0
 
-    for epoch in range(30):  # Early stopping after 20 epochs
+    num_epochs = int(abs(math.log10(learning_rate)) * 10)
+
+    for epoch in range(num_epochs):  # Early stopping after 20 epochs
         print("EPOCH", epoch+1)
         train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, alpha, gamma)
-        _,prauc,_,_, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
+        rocauc,prauc,_,_, bg_rej = validate(model, val_loader, device, epoch, target_sigeff=sigeff)
 
-        metric = prauc
+        metric = prauc*rocauc
 
         if metric > best_metric:
             best_metric = metric
@@ -189,8 +192,12 @@ def objective(trial, train_loader, val_loader, device, sigeff=0.70):
             best_trial_params = {
                 "hidden_dim": hidden_dim,
                 "learning_rate": learning_rate,
+                "gamma": gamma,
+                "alpha": alpha,
                 "bg_rej": bg_rej,
-                "metric": metric
+                "metric": metric,
+                "pr_auc": prauc,
+                "roc_auc": rocauc
             }
             patience_counter = 0
 
@@ -269,8 +276,8 @@ if __name__ == "__main__":
 
     for epoch in range(int(args.epochs)):
         train_loss, _, _ = train(model, train_loader, optimizer, device, epoch, alpha=study.best_params["alpha"], gamma=study.best_params["gamma"])
-        _,_,_,prec, bg_rej = validate(model, val_evts, device, epoch, target_sigeff=float(args.sigeff))
-        metric = prec
+        rocauc,_,_,prec, bg_rej = validate(model, val_evts, device, epoch, target_sigeff=float(args.sigeff))
+        metric = rocauc
         print(f"Epoch {epoch}: Train Loss = {train_loss:.4f}, Metric = {metric:.4f}")
 
         if metric > best_metric:

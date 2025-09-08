@@ -36,7 +36,7 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 2048
+batchsize = 1024
 
 #LOADING DATA
 train_hads = []
@@ -67,8 +67,8 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=48, edge_dim=len(edge_features))
-optimizer = torch.optim.Adam(model.parameters(), lr=0.008) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0025) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
 def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
@@ -79,7 +79,7 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
     bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
     return bce_loss
 
-def focal_loss(preds, labels, gamma=2.2, alpha=0.93):
+def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     """Focal loss to emphasize hard-to-classify samples"""
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)

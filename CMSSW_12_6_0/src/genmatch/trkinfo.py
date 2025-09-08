@@ -197,36 +197,69 @@ for i, evt in enumerate(tree):
     trk_phi_array = np.array(evt.trk_phi)
     d_eta_array = np.array(evt.Daughters_eta)
     d_phi_array = np.array(evt.Daughters_phi)
+
+    #delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
+    #valid_tracks = (trk_pt_array >= 0.5) & (np.abs(trk_eta_array) < 2.5)
+    #
+    ##bkg_mask1 = valid_tracks[:, None] & (delta_R_matrix < 0.02) & (0.6 <= (trk_pt_array[:, None] / d_pt_array)) & ((trk_pt_array[:, None] / d_pt_array) < 0.8)
+    ##bkg_mask2 = valid_tracks[:, None] & (0.02 < delta_R_matrix) & (delta_R_matrix < 0.1)
+    ##bkg_mask3 = valid_tracks[:, None] & (0.1 < delta_R_matrix) & (delta_R_matrix < 0.2)
+    #
+    #
+    #min_deltaR_indices = np.argmin(delta_R_matrix, axis=0)
+
+    #min_deltaRs = delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])]
+    #pt_ratios   = trk_pt_array[min_deltaR_indices] / d_pt_array
+
+    #delr.assign(min_deltaRs.tolist())
+    #ptrat.assign(pt_ratios.tolist())
+    #
+
+    #sig_mask = valid_tracks[min_deltaR_indices] & \
+    #           (delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])] < 0.02) & \
+    #           (0.8 <= (trk_pt_array[min_deltaR_indices] / d_pt_array)) & \
+    #           ((trk_pt_array[min_deltaR_indices] / d_pt_array) <= 1.2)
+    #sig_indices = min_deltaR_indices[sig_mask]
+    #miss_sig_count = np.sum(~np.isin(sig_indices, seltrk_ind))
+    #missed_sig.assign([int(miss_sig_count)])
+    #sig_ind.assign(sig_indices.tolist())
+    #sig_daughters = np.where(sig_mask)[0]  # Get indices of selected daughters
+    #sig_flag.assign(d_flag_array[sig_daughters].tolist())  
+    #sig_flav.assign(d_flav_array[sig_daughters].tolist())
+
+    # --- Daughter ↔ Track matching ---
     delta_R_matrix = delta_R(trk_eta_array, trk_phi_array, d_eta_array, d_phi_array)
-    valid_tracks = (trk_pt_array >= 0.5) & (np.abs(trk_eta_array) < 2.5)
+    all_pt_ratios  = trk_pt_array[:, None] / d_pt_array[None, :]
     
-    #bkg_mask1 = valid_tracks[:, None] & (delta_R_matrix < 0.02) & (0.6 <= (trk_pt_array[:, None] / d_pt_array)) & ((trk_pt_array[:, None] / d_pt_array) < 0.8)
-    #bkg_mask2 = valid_tracks[:, None] & (0.02 < delta_R_matrix) & (delta_R_matrix < 0.1)
-    #bkg_mask3 = valid_tracks[:, None] & (0.1 < delta_R_matrix) & (delta_R_matrix < 0.2)
+    # Apply quality cuts to all pairs
+    pair_mask = (trk_pt_array[:, None] >= 0.5) & (np.abs(trk_eta_array)[:, None] < 2.5) & \
+                (delta_R_matrix < 0.02) & (all_pt_ratios >= 0.8) & (all_pt_ratios <= 1.2)
     
+    # Mask invalid pairs with ∞ so they never win argmin
+    delta_R_masked = np.where(pair_mask, delta_R_matrix, np.inf)
     
-    min_deltaR_indices = np.argmin(delta_R_matrix, axis=0)
-
-    min_deltaRs = delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])]
-    pt_ratios   = trk_pt_array[min_deltaR_indices] / d_pt_array
-
-    delr.assign(min_deltaRs.tolist())
-    ptrat.assign(pt_ratios.tolist())
+    # Pick the closest valid track per daughter
+    best_indices = np.argmin(delta_R_masked, axis=0)               # track indices
+    best_deltaRs = delta_R_masked[best_indices, np.arange(delta_R_masked.shape[1])]
+    best_pt_ratios = trk_pt_array[best_indices] / d_pt_array
     
-
-    sig_mask = valid_tracks[min_deltaR_indices] & \
-               (delta_R_matrix[min_deltaR_indices, np.arange(delta_R_matrix.shape[1])] < 0.02) & \
-               (0.8 <= (trk_pt_array[min_deltaR_indices] / d_pt_array)) & \
-               ((trk_pt_array[min_deltaR_indices] / d_pt_array) <= 1.2)
-    sig_indices = min_deltaR_indices[sig_mask]
+    # Daughters with no valid match will have ΔR = inf
+    matched_mask = np.isfinite(best_deltaRs)
+    
+    # --- Save results to branches ---
+    delr.assign(best_deltaRs.tolist())
+    ptrat.assign(best_pt_ratios.tolist())
+    
+    sig_indices = best_indices[matched_mask]
+    sig_daughters = np.where(matched_mask)[0]
+    
     miss_sig_count = np.sum(~np.isin(sig_indices, seltrk_ind))
+    
     missed_sig.assign([int(miss_sig_count)])
     sig_ind.assign(sig_indices.tolist())
-    sig_daughters = np.where(sig_mask)[0]  # Get indices of selected daughters
-    sig_flag.assign(d_flag_array[sig_daughters].tolist())  
+    sig_flag.assign(d_flag_array[sig_daughters].tolist())
     sig_flav.assign(d_flav_array[sig_daughters].tolist())
 
-    
     #bkg_indices, bkg_daughters = np.where(bkg_mask1 | bkg_mask2 | bkg_mask3)
     #if len(bkg_indices) > 20:
     #    sampled_indices = np.random.choice(len(bkg_indices), size=20, replace=False)
