@@ -49,6 +49,7 @@
 #include "RecoVertex/KalmanVertexFit/interface/KalmanVertexTrackCompatibilityEstimator.h"
 #include "RecoVertex/KalmanVertexFit/interface/KalmanVertexSmoother.h"
 #include "TrackingTools/GeomPropagators/interface/AnalyticalImpactPointExtrapolator.h"
+#include "RecoVertex/AdaptiveVertexFinder/interface/SVTimeHelpers.h"
 
 //TFile Service
 
@@ -124,9 +125,9 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       edm::EDGetTokenT<std::vector<PileupSummaryInfo>> PupInfoT_;
       double vtxweight_;
       std::unique_ptr<TracksClusteringFromDisplacedSeed> clusterizer;
-      //std::string genmatch_csv_;
+      std::string genmatch_csv_;
 
-      //std::map<std::tuple<unsigned int, unsigned int, unsigned int>, std::vector<int>> sigMatchMap_;
+      std::map<std::tuple<unsigned int, unsigned int, unsigned int>, std::vector<int>> sigMatchMap_;
 
       unsigned int run_;
       unsigned int lumi_;

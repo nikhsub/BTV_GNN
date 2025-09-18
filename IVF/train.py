@@ -81,53 +81,13 @@ def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
 
 def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     """Focal loss to emphasize hard-to-classify samples"""
+    gamma = float(gamma)
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction='none')
     bce_loss = loss_fn(preds, labels)
     pt = torch.exp(-bce_loss)  # Probability of correct classification
     focal_weight = (1 - pt) ** gamma
     loss = alpha * focal_weight * bce_loss
     return loss.mean()
-
-def focal_loss2(preds, labels, gamma=2.5, alpha_pos=0.98, alpha_neg=0.02, margin=0.3):
-    labels = labels.float()
-    margin_tensor = torch.where(labels == 1, -margin, margin)
-    preds_adj = preds + margin_tensor
-
-    bce_loss = F.binary_cross_entropy_with_logits(preds_adj, labels, reduction='none')
-    pt = torch.exp(-bce_loss)
-    focal_weight = (1 - pt) ** gamma
-    alpha = torch.where(labels == 1, alpha_pos, alpha_neg)
-    loss = alpha * focal_weight * bce_loss
-    return loss.mean()
-
-def target_eff_loss(preds, labels, target_tpr=0.7, scale=0.1):
-    preds = torch.sigmoid(preds)
-    preds = preds.view(-1)  # Shape [N]
-    labels = labels.view(-1)  # Shape [N]
-
-    sorted_indices = torch.argsort(preds, descending=True)
-    sorted_preds = preds[sorted_indices]
-    sorted_labels = labels[sorted_indices]
-
-    # Cumulative sum for signal and background counts
-    cumsum_labels = torch.cumsum(sorted_labels, dim=0)
-    total_signal = cumsum_labels[-1]
-    total_background = len(labels) - total_signal
-
-    # Find threshold index for target TPR
-    target_index = torch.argmax((cumsum_labels >= target_tpr * total_signal).to(torch.int64))
-    threshold = sorted_preds[target_index]
-
-    # Calculate FPR and Precision at this threshold
-    tp = cumsum_labels[target_index]
-    fp = (target_index + 1) - tp
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    fpr = fp / total_background if total_background > 0 else 0
-    bg_rejection = 1 - fpr
-
-    loss = -scale*(precision+0.1*bg_rejection)
-    return loss
-
 
 def contrastive_loss(x1, x2, temperature=0.5):
     """Compute the contrastive loss"""
@@ -165,13 +125,11 @@ def compute_class_weights(labels):
     return pos_weight
 
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
+def train(model, train_loader, optimizer, device, epoch, gamma=2.0):
     model.to(device)
     model.train()
     total_loss=0
     total_node_loss = 0
-    total_cont_loss = 0
-    total_eff_loss  = 0
     all_gate_values = []
 
     for data in tqdm(train_loader, desc="Training", unit="Batch"):
@@ -179,39 +137,13 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
 
         optimizer.zero_grad()
         num_nodes = data.x.size(0)
-        #batch_had_weight = 1
-        
-        #edge_index = knn_graph(data.x, k=4, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
         
         node_embeds1, preds1, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
-        #node_embeds1, preds1, *_ = model(data.x, data.edge_index, data.edge_attr)
-        
-        #edge_index2, edge_attr2 = drop_edges(data.edge_index, data.edge_attr, 0.5)
-        #node_embeds2, _, _,_,_ = model(.unsqueeze(0)data.x, edge_index2, edge_attr2)
-        
-        #weight = torch.tensor(compute_class_weights(data.y.float().unsqueeze(1)), dtype=torch.float, device=device)//2
-        #loss_fn = torch.nn.BCEWithLogitsLoss()
-        #node_loss = loss_fn(preds1, data.y.float().unsqueeze(1))
-        
-        #node_loss = class_weighted_bce(preds1, data.y.float().unsqueeze(1), pos_weight=weight, neg_weight=1)*batch_had_weight
-        node_loss = focal_loss(preds1.squeeze(0), data.y.float().unsqueeze(1))
-
-        #del preds1, edge_index2, edge_attr2   # Helps free memory from large prediction tensor
-        #torch.cuda.empty_cache()
-        #cont_loss = sampled_contrastive_loss(node_embeds1, node_embeds2)
-        #eff_loss = target_eff_loss(preds1, data.y.float().unsqueeze(1), target_tpr=0.70, scale=0.1)
-        eff_loss = torch.tensor(0.0, device=device)
-
-        if bce_loss:
-            cont_loss = torch.tensor(0.0, device=device)
-        else:
-            edge_index2 = shuffle_edge_index(data.edge_index).to(device)
-            node_embeds2, logits2, _,_,_, = model(data.x, edge_index2)
-            cont_loss = contrastive_loss(node_embeds1, node_embeds2)
+        node_loss = focal_loss(preds1.squeeze(0), data.y.float().unsqueeze(1), gamma=float(gamma), alpha=0.9)
 
         batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
-        loss = cont_loss + node_loss
+        loss = node_loss
 
         loss.backward()
         optimizer.step()
@@ -219,18 +151,14 @@ def train(model, train_loader, optimizer, device, epoch, bce_loss=True):
 
         total_loss      += loss.item()
         total_node_loss += node_loss.item()
-        total_cont_loss += cont_loss.item()
-        total_eff_loss  += eff_loss.item()
         #all_gate_values.append(model.last_gate.mean().item())
 
     avg_loss = total_loss / len(train_loader)
     avg_node_loss = total_node_loss / len(train_loader)
-    avg_cont_loss = total_cont_loss / len(train_loader)
-    avg_eff_loss  = total_eff_loss / len(train_loader)
     #avg_gate_val = sum(all_gate_values) / len(all_gate_values)
 
     #print(f"No seed hadrons: {nosigseeds}")
-    return avg_loss, avg_node_loss, avg_cont_loss, avg_eff_loss, 0.0
+    return avg_loss, avg_node_loss
 
 #TEST
 def test(model, test_loader, device, epoch, k=11, thres=0.5):
@@ -367,11 +295,8 @@ best_metric = -1
 patience = 8
 no_improve = 0
 val_every = 10
-
-rolling_bce_loss = []
-stabilization_epochs = 5  # Number of epochs to track for stabilization
-stabilization_tolerance = 0.000  # Threshold for detecting stabilization
-using_bce_loss = True  # Flag to indicate current loss type
+gamma_min = 1.0
+gamma_max = 2.9
 
 stats = {
     "epochs": [],
@@ -379,8 +304,6 @@ stats = {
         "epoch": None,
         "total_loss": None,
         "node_loss": None,
-        "cont_loss": None,
-        "eff_loss": None,
         "bkg_acc": None,
         "sig_acc": None,
         "test_auc": None,
@@ -396,18 +319,11 @@ stats = {
 }
 
 for epoch in range(int(args.epochs)):
-    if using_bce_loss:
-        tot_loss, node_loss, cont_loss, eff_loss, gate_val = train(model, train_loader,  optimizer, device, epoch, bce_loss=True)
-        rolling_bce_loss.append(node_loss)
-        if len(rolling_bce_loss) > stabilization_epochs:
-            rolling_bce_loss.pop(0)
-        if len(rolling_bce_loss) == stabilization_epochs:
-            loss_change = max(rolling_bce_loss) - min(rolling_bce_loss)
-            if loss_change < stabilization_tolerance:
-                print(f"Switching to contrastive loss at epoch {epoch + 1}.")
-                using_bce_loss = False
-    else:
-        tot_loss, node_loss, cont_loss, eff_loss = train(model, train_loader,  optimizer, device, epoch, bce_loss=False)
+    #gamma = float(gamma_max * (epoch / int(args.epochs)))
+    progress = epoch / (int(args.epochs) - 1)
+    gamma = gamma_min + (gamma_max - gamma_min) * (1 - math.cos(math.pi * progress)) / 2
+
+    tot_loss, node_loss = train(model, train_loader,  optimizer, device, epoch, gamma=gamma)
 
 
     bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, k=12, thres=glob_test_thres)
@@ -435,8 +351,6 @@ for epoch in range(int(args.epochs)):
                 "epoch": epoch + 1,
                 "total_loss": tot_loss,
                 "node_loss": node_loss,
-                "cont_loss": cont_loss,
-                "eff_loss": eff_loss,
                 "bkg_acc": bkg_acc,
                 "sig_acc": sig_acc,
                 "test_auc": test_auc,
@@ -466,8 +380,6 @@ for epoch in range(int(args.epochs)):
         "epoch": epoch + 1,
         "total_loss": tot_loss,
         "node_loss": node_loss,
-        "cont_loss": cont_loss,
-        "eff_loss": eff_loss,
         "bkg_acc": bkg_acc,
         "sig_acc": sig_acc,
         "test_auc": test_auc,
@@ -482,7 +394,7 @@ for epoch in range(int(args.epochs)):
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Avg gate value: {gate_val:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Gamma: {gamma:.4f}")
     print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test AUC: {test_auc:.4f}, Test Loss: {test_loss:.4f}")
 
 

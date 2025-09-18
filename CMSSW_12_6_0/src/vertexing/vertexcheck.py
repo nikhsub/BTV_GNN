@@ -1,28 +1,33 @@
 from ROOT import *
 gErrorIgnoreLevel = 5000
-import sys
-import numpy as np
 import argparse
-#import array
-import math
 import numpy as np
+import math
 import random
+from scipy.optimize import linear_sum_assignment
+import matplotlib.pyplot as plt
 
+# ------------------------
+# Parse arguments
+# ------------------------
 parser = argparse.ArgumentParser("Compare vertex info")
-
 parser.add_argument("-i", "--inp", default="test_ntuple.root", help="Input root file")
-
 args = parser.parse_args()
 
+# ------------------------
+# Open ROOT file
+# ------------------------
 infile = args.inp
-
 Infile = TFile(infile, 'READ')
 demo = Infile.Get('demo')
 tree = demo.Get('tree')
 
-match_threshold = 10
+# ------------------------
+# Config
+# ------------------------
+match_threshold = 2.0
 
-# Initialize counters
+# Counters
 total_GVs = 0
 matched_GVs = 0
 total_SVs = 0
@@ -31,13 +36,21 @@ total_ivf = 0
 matched_ivf = 0
 matched_GVs_ivf = 0
 
+fake_SVs = 0
+fake_IVFs = 0
+
+# Min-distance storage
 min_dists_gnn = []
 min_dists_ivf = []
 
+# ------------------------
+# Loop over events
+# ------------------------
 for entry in tree:
     n_gv = entry.nGV[0]
     n_sv = entry.nSVs_reco[0]
     n_ivf = entry.nSVs[0]
+
     total_GVs += n_gv
     total_SVs += n_sv
     total_ivf += n_ivf
@@ -46,66 +59,77 @@ for entry in tree:
     SV_coords = np.array(list(zip(entry.SV_x_reco, entry.SV_y_reco, entry.SV_z_reco)))
     ivf_coords = np.array(list(zip(entry.SV_x, entry.SV_y, entry.SV_z)))
 
-    used_sv_indices = set()
-    matched_SVs_event = set()
-    used_ivf_indices = set()
-    matched_ivf_event = set()
+    # -------- GV ↔ RECO SV matching --------
+    if len(GV_coords) and len(SV_coords):
+        cost_matrix = np.linalg.norm(GV_coords[:, None, :] - SV_coords[None, :, :], axis=2)
+        gv_idx, sv_idx = linear_sum_assignment(cost_matrix)
+        matched_SVs_event = set()
+        for g, s in zip(gv_idx, sv_idx):
+            dist = cost_matrix[g, s]
+            min_dists_gnn.append(dist)
+            if dist < match_threshold:
+                matched_GVs += 1
+                matched_SVs_event.add(s)
+        matched_SVs += len(matched_SVs_event)
+        fake_SVs += (n_sv - len(matched_SVs_event))
 
-    for gv in GV_coords:
-        if len(SV_coords) == 0:
-            continue  # No SVs to compare, skip this GV
-        distances = np.linalg.norm(SV_coords - gv, axis=1)
-        min_dists_gnn.append(np.min(distances))
-        sv_idx = np.argmin(distances)
-        #print(distances[sv_idx])
-        if distances[sv_idx] < match_threshold and sv_idx not in used_sv_indices:
-            matched_GVs += 1
-            matched_SVs_event.add(sv_idx)
-            used_sv_indices.add(sv_idx)
+    # -------- GV ↔ IVF SV matching --------
+    if len(GV_coords) and len(ivf_coords):
+        cost_matrix = np.linalg.norm(GV_coords[:, None, :] - ivf_coords[None, :, :], axis=2)
+        gv_idx, ivf_idx = linear_sum_assignment(cost_matrix)
+        matched_IVF_event = set()
+        for g, s in zip(gv_idx, ivf_idx):
+            dist = cost_matrix[g, s]
+            min_dists_ivf.append(dist)
+            if dist < match_threshold:
+                matched_GVs_ivf += 1
+                matched_IVF_event.add(s)
+        matched_ivf += len(matched_IVF_event)
+        fake_IVFs += (n_ivf - len(matched_IVF_event))
 
-    matched_SVs += len(matched_SVs_event)  # count for this event
+# ------------------------
+# Close ROOT file
+# ------------------------
+Infile.Close()
 
-    for gv in GV_coords:
-        if len(ivf_coords) == 0:
-            continue  # No SVs to compare, skip this GV
-        distances_ivf = np.linalg.norm(ivf_coords - gv, axis=1)
-        min_dists_ivf.append(np.min(distances_ivf))
-        ivf_idx = np.argmin(distances_ivf)
-        #print(distances[sv_idx])
-        if distances_ivf[ivf_idx] < match_threshold and ivf_idx not in used_ivf_indices:
-            matched_GVs_ivf += 1
-            matched_ivf_event.add(ivf_idx)
-            used_ivf_indices.add(ivf_idx)
-
-    matched_ivf += len(matched_ivf_event)  # count for this event
-
-eff_GV_match = matched_GVs / total_GVs if total_GVs else 0
-eff_SV_match = matched_SVs / total_SVs if total_SVs else 0
+# ------------------------
+# Efficiencies
+# ------------------------
+eff_GV_match     = matched_GVs     / total_GVs if total_GVs else 0
+eff_SV_recovery  = matched_SVs     / total_SVs if total_SVs else 0
 eff_ivf_GV_match = matched_GVs_ivf / total_GVs if total_GVs else 0
-eff_ivf_SV_match = matched_ivf / total_ivf if total_ivf else 0
+eff_ivf_recovery = matched_ivf     / total_ivf if total_ivf else 0
 
-print(f"GV matching efficiency (to RECO SV): {eff_GV_match:.3f}")
-print(f"RECO SV recovery rate (from GV): {eff_SV_match:.3f}")
-print(f"GV matching efficiency (to IVF SV): {eff_ivf_GV_match:.3f}")
-print(f"IVF SV recovery rate (from GV): {eff_ivf_SV_match:.3f}")
+# Fake rates
+fake_rate_SV  = fake_SVs  / total_SVs if total_SVs else 0
+fake_rate_IVF = fake_IVFs / total_ivf if total_ivf else 0
 
+# ------------------------
 # Reporting
+# ------------------------
+print(f"GV matching efficiency (to RECO SV): {eff_GV_match:.3f}")
+print(f"GV matching efficiency (to IVF SV):  {eff_ivf_GV_match:.3f}")
+print()
+print(f"Fake rate (RECO SVs not matched): {fake_rate_SV:.3f}")
+print(f"Fake rate (IVF SVs not matched):  {fake_rate_IVF:.3f}")
+print()
 print("## RECO ##")
 print(f"Total GVs: {total_GVs}")
 print(f"Matched GVs: {matched_GVs}")
 print(f"Total SVs: {total_SVs}")
-#print(f"Matched SVs: {matched_SVs}")
-print("")
+print(f"Matched SVs: {matched_SVs}")
+print(f"Fake SVs: {fake_SVs}")
+print()
 print("## IVF ##")
 print(f"Total GVs: {total_GVs}")
 print(f"Matched GVs IVF: {matched_GVs_ivf}")
 print(f"Total IVF SVs: {total_ivf}")
+print(f"Matched IVF SVs: {matched_ivf}")
+print(f"Fake IVF SVs: {fake_IVFs}")
 
-Infile.Close()
-#print(f"Matched IVF SVs: {matched_ivf}")
-
-import matplotlib.pyplot as plt
-
+# ------------------------
+# Plots: min distances
+# ------------------------
 plt.figure(figsize=(8, 5))
 plt.hist(min_dists_gnn, bins=100, alpha=0.6, label="Genmatch", color='red', log=True)
 plt.hist(min_dists_ivf, bins=100, alpha=0.6, label="IVF", color='blue', log=True)
@@ -116,9 +140,43 @@ plt.title("Minimum GV-SV Distance Distribution")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("mindist_alltracks_0809.png")
+plt.savefig("mindist_genmatch.png")
 
+# ------------------------
+# Threshold scan
+# ------------------------
+thresholds = np.linspace(0.0, 10.0, 500)
+min_dists_gnn_np = np.array(min_dists_gnn)
+min_dists_ivf_np = np.array(min_dists_ivf)
 
+eff_gnn  = [np.sum(min_dists_gnn_np < thr) / total_GVs if total_GVs else 0 for thr in thresholds]
+eff_ivf  = [np.sum(min_dists_ivf_np < thr) / total_GVs if total_GVs else 0 for thr in thresholds]
+fake_gnn = [(total_SVs - np.sum(min_dists_gnn_np < thr)) / total_SVs if total_SVs else 0 for thr in thresholds]
+fake_ivf = [(total_ivf - np.sum(min_dists_ivf_np < thr)) / total_ivf if total_ivf else 0 for thr in thresholds]
 
+# --- Plot Efficiency vs Threshold
+plt.figure(figsize=(8,5))
+plt.plot(thresholds, eff_gnn, label="GV→RECO SV efficiency", color="red")
+plt.plot(thresholds, eff_ivf, label="GV→IVF SV efficiency", color="blue")
+plt.axvline(match_threshold, color='k', linestyle='--', label=f"Chosen thr = {match_threshold}")
+plt.xlabel("Matching distance threshold [cm]")
+plt.ylabel("Efficiency")
+plt.title("GV→SV Matching Efficiency vs Threshold")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("efficiency_vs_threshold.png")
 
-    
+# --- Plot Fake Rate vs Threshold
+plt.figure(figsize=(8,5))
+plt.plot(thresholds, fake_gnn, label="RECO SV fake rate", color="red")
+plt.plot(thresholds, fake_ivf, label="IVF SV fake rate", color="blue")
+plt.axvline(match_threshold, color='k', linestyle='--', label=f"Chosen thr = {match_threshold}")
+plt.xlabel("Matching distance threshold [cm]")
+plt.ylabel("Fake Rate")
+plt.title("SV Fake Rate vs Threshold")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("fakerate_vs_threshold.png")
+
