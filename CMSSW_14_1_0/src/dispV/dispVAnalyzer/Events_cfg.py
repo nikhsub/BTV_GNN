@@ -83,13 +83,13 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     vertexfitter = cms.untracked.PSet(
              finder = cms.string('avr')
          ),
-    TrackPredCut = cms.untracked.double(0.15), # set to 0 should be IVF normal reconstruction?
+    TrackPredCut = cms.untracked.double(0.7),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out64_focloss_opt_0809.onnx"),
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out64_bce_2209.onnx"),
     genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0909.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbarhad_mod3k_0p15cut_1609.root"),
+        fileName = cms.string("ttbarhad_mod3k_0p7cut_2209.root"),
 )
 
 process.p = cms.Path(process.mergedGenParticles + process.demo)

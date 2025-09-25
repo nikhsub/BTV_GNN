@@ -36,7 +36,16 @@ glob_test_thres = 0.5
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 1024
+batchsize = 500
+
+def compute_global_pos_weight(graphs, device):
+    total_pos, total_neg = 0, 0
+    for g in graphs:
+        y = g.y.cpu().numpy()
+        total_pos += (y == 1).sum()
+        total_neg += (y == 0).sum()
+    ratio = total_neg / max(total_pos, 1)  # avoid div0
+    return torch.tensor([ratio], device=device)
 
 #LOADING DATA
 train_hads = []
@@ -67,11 +76,15 @@ test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_mem
 #DEVICE AND MODEL
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features))
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0025) #Was 0.00005
+model = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) #Was 0.00005
 #scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
 
-def class_weighted_bce(preds, labels, pos_weight=5.0, neg_weight=1.0):
+pos_w = compute_global_pos_weight(train_hads, device)
+loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
+print(f"Computed pos_weight: {pos_w.item():.2f}")
+
+def class_weighted_bce(preds, labels, pos_weight=9.0, neg_weight=1.0):
     """Class-weighted binary cross-entropy loss"""
     pos_weight = torch.tensor(pos_weight, device=preds.device)
     neg_weight = torch.tensor(neg_weight, device=preds.device)
@@ -139,7 +152,7 @@ def train(model, train_loader, optimizer, device, epoch, gamma=2.0):
         num_nodes = data.x.size(0)
         
         node_embeds1, preds1, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
-        node_loss = focal_loss(preds1.squeeze(0), data.y.float().unsqueeze(1), gamma=float(gamma), alpha=0.9)
+        node_loss = loss_fn(preds1.squeeze(0), data.y.float().unsqueeze(1))
 
         batch_had_weight = data.had_weight[data.batch].mean().to(device)
 
@@ -295,8 +308,8 @@ best_metric = -1
 patience = 8
 no_improve = 0
 val_every = 10
-gamma_min = 1.0
-gamma_max = 2.9
+#gamma_min = 1.0
+#gamma_max = 2.9
 
 stats = {
     "epochs": [],
@@ -320,10 +333,10 @@ stats = {
 
 for epoch in range(int(args.epochs)):
     #gamma = float(gamma_max * (epoch / int(args.epochs)))
-    progress = epoch / (int(args.epochs) - 1)
-    gamma = gamma_min + (gamma_max - gamma_min) * (1 - math.cos(math.pi * progress)) / 2
+    #progress = epoch / (int(args.epochs) - 1)
+    #gamma = gamma_min + (gamma_max - gamma_min) * (1 - math.cos(math.pi * progress)) / 2
 
-    tot_loss, node_loss = train(model, train_loader,  optimizer, device, epoch, gamma=gamma)
+    tot_loss, node_loss = train(model, train_loader,  optimizer, device, epoch)
 
 
     bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, k=12, thres=glob_test_thres)
@@ -341,7 +354,7 @@ for epoch in range(int(args.epochs)):
         val_auc, pr_auc, val_loss, prec, bg_rej = validate(model, val_evts, device, epoch, k=12, target_sigeff=0.70)
         print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
 
-        metric = pr_auc
+        metric = val_auc
 
         if metric > best_metric:
             best_metric = metric
@@ -394,7 +407,7 @@ for epoch in range(int(args.epochs)):
     }
     stats["epochs"].append(epoch_stats)
     
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}, Gamma: {gamma:.4f}")
+    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}")
     print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test AUC: {test_auc:.4f}, Test Loss: {test_loss:.4f}")
 
 
