@@ -516,11 +516,6 @@ DemoAnalyzer::TrackVertexArbitrator(const reco::Vertex& pv,
   return out;
 }
 
-
-
-
-
-
 inline float DemoAnalyzer::sigmoid(float x) {
     if (std::isnan(x)) return 0.0f;  // handle NaN safely
     if (x >= 0.0f) {
@@ -547,20 +542,18 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   lumi_ = iEvent.luminosityBlock();
   evt_ = iEvent.id().event();
 
-  std::vector<int> matched_indices;
+  std::unordered_set<int> genmatched_indices;
 	
   auto key = std::make_tuple(run_, lumi_, evt_);
   auto it = sigMatchMap_.find(key);
   if (it != sigMatchMap_.end()) {
-      matched_indices = it->second;
+	genmatched_indices.insert(it->second.begin(), it->second.end());
   }
 
   nPU = 0;
     //vectors defined in .h
   Hadron_pt.clear();
   Hadron_SVIdx.clear();
-  
-  
   Hadron_SVDistance.clear();
   Hadron_eta.clear();
   Hadron_phi.clear();
@@ -1071,9 +1064,66 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    
 
     // IVF default clustering
+
    //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
    
-   //Model based cluster filtering
+   //MODEL based cluster filtering
+
+   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
+   // clusterizer->clusters(pv, t_trks_SV);
+
+   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
+   ////
+   //// helper lambda: match track index by (pt, eta, phi) within tolerance
+   //auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
+   //  const auto& ref = trk.track();
+   //  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
+   //    const auto& cand = t_trks_SV[i].track();
+   //    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
+   //        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
+   //        std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
+   //      return static_cast<int>(i);
+   //    }
+   //  }
+   //  return -1;  // not found
+   //};
+   ////Keep based on seed track
+   //for (auto& cl : clustersAll) {
+   //   int k = matchIndex(cl.seedingTrack);  // index into t_trks_SV
+   //   if (k >= 0) {
+   //     size_t origIdx = t_trks_SV_indices[k];  // map back to original index
+   //     if (preds[origIdx] > score_threshold) {
+   //       clusters.push_back(std::move(cl));    // keep only ML-seeded clusters
+   //     }
+   //   }
+   //}
+   //
+   ////Keep based on number of tracks passing model cut
+   //int nRequiredPassingTracks = 2;  // <-- control this as you like
+
+   //for (auto& cl : clustersAll) {
+   //    int nPass = 0;
+   //
+   //    // loop over all tracks in the cluster
+   //    for (const auto& trk : cl.tracks) {
+   //        int k = matchIndex(trk);
+   //        if (k >= 0) {
+   //            size_t origIdx = t_trks_SV_indices[k];
+   //            if (preds[origIdx] > score_threshold) {
+   //                ++nPass;
+   //                if (nPass >= nRequiredPassingTracks) break; // stop once threshold is met
+   //            }
+   //        }
+   //    }
+   //
+   //    if (nPass >= nRequiredPassingTracks) {
+   //        clusters.push_back(std::move(cl));
+   //    }
+   //}
+
+   
+   //GENMATCHED based clustering
+   
    std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
     clusterizer->clusters(pv, t_trks_SV);
 
@@ -1093,15 +1143,44 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
      return -1;  // not found
    };
 
+   //Keep based on seed track
    for (auto& cl : clustersAll) {
-      int k = matchIndex(cl.seedingTrack);  // index into t_trks_SV
-      if (k >= 0) {
-        size_t origIdx = t_trks_SV_indices[k];  // map back to original index
-        if (preds[origIdx] > score_threshold) {
-          clusters.push_back(std::move(cl));    // keep only ML-seeded clusters
-        }
-      }
+     int k = matchIndex(cl.seedingTrack);
+     if (k >= 0) {
+         size_t origIdx = t_trks_SV_indices[k];
+         if (genmatched_indices.count(origIdx)) {
+             clusters.push_back(std::move(cl));
+         }
+     }
    }
+
+   //Keep based on number of tracks that are present in genmatched indices
+   //int nRequiredGenMatchedTracks = 1;  // <-- configurable
+
+   //for (auto& cl : clustersAll) {
+   //    int nGenMatched = 0;
+   //
+   //    // loop over all tracks in the cluster
+   //    for (const auto& trk : cl.tracks) {
+   //        int k = matchIndex(trk);
+   //        if (k >= 0) {
+   //            size_t origIdx = t_trks_SV_indices[k];
+   //            if (expanded_indices.count(origIdx)) { // check if gen matched
+   //                ++nGenMatched;
+   //                if (nGenMatched >= nRequiredGenMatchedTracks) break;
+   //            }
+   //        }
+   //    }
+   //
+   //    if (nGenMatched >= nRequiredGenMatchedTracks) {
+   //        clusters.push_back(std::move(cl));
+   //    }
+   //}
+
+
+
+   
+
 
 
    std::vector<TransientVertex> recoVertices;
@@ -1404,21 +1483,21 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 			if(!addedGV){
 				ngv++;
 				if(hadPDG==1) ngv_b++;
-                if(hadPDG==2) ngv_d++;
-                if(hadPDG==3) ngv_s++;
-                if(hadPDG==4) ngv_tau++;
+               			if(hadPDG==2) ngv_d++;
+		                if(hadPDG==3) ngv_s++;
+                		if(hadPDG==4) ngv_tau++;
 			        Hadron_GVx.push_back(vx);
-                    Hadron_GVy.push_back(vy); 
-                    Hadron_GVz.push_back(vz); 
-                    GV_flag.push_back(nhads-1); //Which hadron it belongs to
+                    		Hadron_GVy.push_back(vy); 
+                    		Hadron_GVz.push_back(vz); 
+                    		GV_flag.push_back(nhads-1); //Which hadron it belongs to
 				addedGV = true;
 			}
 			Daughters_pt.insert(Daughters_pt.end(), temp_Daughters_pt.begin(), temp_Daughters_pt.end());
             //Daughters_pdg.insert(Daughters_pdg.end(), temp_Daughters_pdg.begin(), temp_Daughters_pdg.end());
-            Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
-            Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
-            Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
-            Daughters_flag.insert(Daughters_flag.end(), temp_Daughters_flag.begin(), temp_Daughters_flag.end());
+            		Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
+            		Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
+            		Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
+            		Daughters_flag.insert(Daughters_flag.end(), temp_Daughters_flag.begin(), temp_Daughters_flag.end());
 			Daughters_flav.insert(Daughters_flav.end(), temp_Daughters_flav.begin(), temp_Daughters_flav.end());
 			nd = nPack;
 			if(hadPDG==1) nd_b = nd;

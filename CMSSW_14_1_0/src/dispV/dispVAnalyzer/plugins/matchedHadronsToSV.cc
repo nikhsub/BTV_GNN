@@ -99,7 +99,7 @@ std::pair<std::vector<int>, std::vector<float>>  matchHadronsToSV(
         }
         //std::cout<<"Here here2"<<"\n";
         // Match logic: check for 1 (2) or more matched tracks by ΔR & dPt/pT
-        int nRequiredCommonTracks = 1;
+        int nRequiredCommonTracks = 2;
         int common = 0;
         for (size_t iSV : svTrackIdxs_fromBestSV) {
             //std::cout<<"here3 "<<iSV<<std::endl;

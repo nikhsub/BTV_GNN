@@ -147,7 +147,7 @@ def evaluate(graphs, model, device):
     return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr, all_preds, all_labels #Recall is the same thing as tpr
 
 #model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 64, edge_dim=len(edge_features))
+model1 = GNNModel(len(trk_features), 128, edge_dim=len(edge_features))
 model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
 model1.eval()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

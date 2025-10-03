@@ -1,4 +1,13 @@
 import FWCore.ParameterSet.Config as cms
+import FWCore.ParameterSet.VarParsing as VarParsing
+
+options = VarParsing.VarParsing("analysis")
+options.register("trackCut", 0.0, VarParsing.VarParsing.multiplicity.singleton,
+                 VarParsing.VarParsing.varType.float, "TrackPredCut value")
+options.register("outfile", "output.root", VarParsing.VarParsing.multiplicity.singleton,
+                 VarParsing.VarParsing.varType.string, "Output file")
+
+options.parseArguments()
 
 process = cms.Process("Demo")
 
@@ -83,13 +92,15 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     vertexfitter = cms.untracked.PSet(
              finder = cms.string('avr')
          ),
-    TrackPredCut = cms.untracked.double(0.7),
+    TrackPredCut = cms.untracked.double(0.0),
+    #TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out64_bce_2209.onnx"),
-    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0909.csv")
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out128_bce_2509.onnx"),
+    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0210.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbarhad_mod3k_0p7cut_2209.root"),
+        fileName = cms.string("ttbarhad_3k_genmatch_0210.root"),
+        #fileName = cms.string(options.outfile),
 )
 
 process.p = cms.Path(process.mergedGenParticles + process.demo)
