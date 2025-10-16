@@ -27,6 +27,14 @@ model = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features
 model.load_state_dict(torch.load(args.load_model, map_location=torch.device('cpu')))
 model.eval()
 
+total_params = sum(p.numel() for p in model.parameters())
+trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+print(f"Total parameters: {total_params:,}")
+print(f"Trainable parameters: {trainable_params:,}")
+
+
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
