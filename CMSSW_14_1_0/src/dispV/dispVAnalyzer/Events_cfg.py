@@ -28,8 +28,8 @@ process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3000))
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
           seedMax3DIPValue =  cms.double(9999.0),
-          seedMin3DIPSignificance = cms.double(0.0),    # 1.2 sigma    
-          seedMin3DIPValue = cms.double(0.0),         # 50um /0.005
+          seedMin3DIPSignificance = cms.double(1.2),    # 1.2 sigma    
+          seedMin3DIPValue = cms.double(0.005),         # 50um /0.005
           
           clusterMaxDistance = cms.double(0.05),
           clusterMaxSignificance = cms.double(4.5),
@@ -37,26 +37,6 @@ ClusteringParam = cms.PSet(
           clusterMinAngleCosine = cms.double(0.5),
           maxTimeSignificance = cms.double(99999), #3.5 from Nik
 )
-
-arbitrator = cms.PSet(
-        primaryVertices       = cms.InputTag("dummy"),
-        secondaryVertices     = cms.InputTag("dummy"),           # unused by your call
-        tracks                = cms.InputTag("dummy"),           # unused by your call
-        beamSpot              = cms.InputTag("dummy"),
-
-        dRCut                 = cms.double(0.40),
-        distCut               = cms.double(0.040),
-        sigCut                = cms.double(5.0),
-        dLenFraction          = cms.double(0.333),
-        fitterSigmacut        = cms.double(3.0),
-        fitterTini            = cms.double(256.0),
-        fitterRatio           = cms.double(0.25),
-        trackMinLayers        = cms.int32(4),
-        trackMinPt            = cms.double(0.4),
-        trackMinPixels        = cms.int32(1),
-        maxTimeSignificance   = cms.double(3.0)
-    )
-
 
 process.source = cms.Source("PoolSource",
     #fileNames = cms.untracked.vstring("root://cms-xrd-global.cern.ch//store/mc/RunIISummer20UL18MiniAODv2/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/MINIAODSIM/106X_upgrade2018_realistic_v16_L1v1-v1/00000/04A0B676-D63A-6D41-B47F-F4CF8CBE7DB8.root") #Training
@@ -92,15 +72,15 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     vertexfitter = cms.untracked.PSet(
              finder = cms.string('avr')
          ),
-    TrackPredCut = cms.untracked.double(0.0),
-    #TrackPredCut = cms.untracked.double(options.trackCut),
+    #TrackPredCut = cms.untracked.double(0.0),
+    TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out128_bce_2509.onnx"),
-    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0210.csv")
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out128_newmod_2010.onnx")
+    #genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0210.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("ttbarhad_3k_genmatch_0210.root"),
-        #fileName = cms.string(options.outfile),
+        #fileName = cms.string("ttbarhad_3k_genmatch_0210.root"),
+        fileName = cms.string(options.outfile),
 )
 
 process.p = cms.Path(process.mergedGenParticles + process.demo)

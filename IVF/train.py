@@ -7,62 +7,110 @@ import uproot
 import numpy as np
 import torch
 import torch_geometric
-from torch_geometric.nn import knn_graph
 from torch_geometric.data import Data, DataLoader
 from torch.utils.data import random_split
-import pickle5 as pickle
+#import torch5 as torch
+#import torch
 from tqdm import tqdm
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, label_binarize
 import os
+import subprocess
 import torch.nn.functional as F
 import math
-from GCNModel import *
+from AttnModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
-from sklearn.metrics import roc_curve, precision_recall_curve, auc
+from sklearn.metrics import roc_curve, precision_recall_curve, auc, accuracy_score
+import random
 
 parser = argparse.ArgumentParser("GNN training")
 
 parser.add_argument("-e", "--epochs", default=20, help="Number of epochs")
 parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to saved model name")
-parser.add_argument("-lh", "--load_had", default="", help="Path to training files")
 parser.add_argument("-le", "--load_evt", default="", help="Absolute path to event level validation file")
 
 args = parser.parse_args()
 glob_test_thres = 0.5
 
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig','trk_ip2dsig', 'trk_ip3dsig',  'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 500
+batchsize = 2100
 
-def compute_global_pos_weight(graphs, device):
-    total_pos, total_neg = 0, 0
+def compute_ce_node_weight(graphs, device):
+    """
+    Computes class weights for CrossEntropyLoss from one-hot labels.
+    Intended for exclusive 7-class classification.
+    """
+    class_counts = np.zeros(7, dtype=np.int64)
+
     for g in graphs:
-        y = g.y.cpu().numpy()
+        y = g.y.cpu().numpy()  # [N,7]
+        class_counts += y.sum(axis=0).astype(np.int64)
+    # Total number of nodes
+    total = class_counts.sum()
+    # Avoid division by zero
+    class_counts = np.maximum(class_counts, 1)
+    # inverse frequency weighting
+    inv_freq = total / class_counts  # bigger weight = rarer class
+    # normalize (optional but recommended)
+    inv_freq = inv_freq / inv_freq.mean()
+
+    return torch.tensor(inv_freq, dtype=torch.float32, device=device)
+
+def compute_edge_pos_weight(graphs, device):
+    total_pos = 0
+    total_neg = 0
+    for g in graphs:
+        if g.edge_y.numel() == 0:
+            continue
+        y = g.edge_y.cpu().numpy()  # shape [E, 1]
         total_pos += (y == 1).sum()
         total_neg += (y == 0).sum()
-    ratio = total_neg / max(total_pos, 1)  # avoid div0
-    return torch.tensor([ratio], device=device)
 
-#LOADING DATA
+    if total_pos == 0:
+        return torch.tensor([1.0], device=device)
+
+    weight = total_neg / total_pos
+    return torch.tensor([weight], device=device)
+
+
+EOS_PREFIX = "root://cmseos.fnal.gov/"
+EOS_DIR = "/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311"
+local_cache = "/uscms/home/nvenkata/nobackup/BTV/IVF/tmp_pt"
+os.makedirs(local_cache, exist_ok=True)
 train_hads = []
-val_evts = []
-if args.load_had != "":
-    if os.path.isdir(args.load_had):
-        print(f"Loading training data from {args.load_had}...")
-        pkl_files = [os.path.join(args.load_had, f) for f in os.listdir(args.load_had) if f.endswith('.pkl')]
-    for pkl_file in tqdm(pkl_files, desc="Loading .pkl files", unit="file"):
-        with open(pkl_file, 'rb') as f:
-            train_hads.extend(pickle.load(f))
+# Get the list of .pt files from the EOS area
+result = subprocess.run(
+    ["xrdfs", EOS_PREFIX.replace("root://", "").rstrip("/"), "ls", "-u", EOS_DIR],
+    stdout=subprocess.PIPE, text=True, check=True
+)
+pt_files = [line.strip() for line in result.stdout.splitlines() if line.endswith(".pt")]
+pt_files.sort()
 
+print(f"Found {len(pt_files)} .pt files in {EOS_DIR}")
 
-if args.load_evt != "":
-    print(f"Loading event level data from {args.load_evt}...")
-    with open(args.load_evt, 'rb') as f:
-        val_evts = pickle.load(f)
+# Load all torch files (copy -> load -> delete)
+for remote_file in tqdm(pt_files, desc="Loading EOS .pt files", unit="file"):
+    local_path = os.path.join(local_cache, os.path.basename(remote_file))
+
+    # Copy from EOS to local temp
+    subprocess.run(
+        ["xrdcp", "-f", remote_file, local_path],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Load torch
+    train_hads.extend(torch.load(local_path))
+
+    # Delete local file after loading to save space
+    os.remove(local_path)
+
+print(f"Loaded {len(train_hads)} records from {len(pt_files)} torch files.")
 
 #train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
 #val_evts   = val_evts[0:1500]
@@ -70,27 +118,22 @@ if args.load_evt != "":
 train_len = int(0.9 * len(train_hads))
 train_data, test_data = random_split(train_hads, [train_len, len(train_hads) - train_len])
 
-train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=8)
-test_loader = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=8)
+train_loader = DataLoader(train_data, batch_size=batchsize, shuffle=True, pin_memory=True, num_workers=0)
+test_loader  = DataLoader(test_data, batch_size=batchsize, shuffle=False, pin_memory=True, num_workers=0)
 
-#DEVICE AND MODEL
+val_loader = []
+if args.load_evt != "":
+    print(f"Loading event level data from {args.load_evt}...")
+    val_loader = torch.load(args.load_evt)
+
+# device, model, optimizer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-model = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features))
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001) #Was 0.00005
-#scheduler = StepLR(optimizer, step_size = 20, gamma=0.95)
-
-pos_w = compute_global_pos_weight(train_hads, device)
-loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
-print(f"Computed pos_weight: {pos_w.item():.2f}")
-
-def class_weighted_bce(preds, labels, pos_weight=9.0, neg_weight=1.0):
-    """Class-weighted binary cross-entropy loss"""
-    pos_weight = torch.tensor(pos_weight, device=preds.device)
-    neg_weight = torch.tensor(neg_weight, device=preds.device)
-    weights = torch.where(labels == 1, pos_weight, neg_weight)
-    bce_loss = F.binary_cross_entropy(preds, labels, weight=weights)
-    return bce_loss
+pos_w_node = compute_ce_node_weight(train_hads, device)
+pos_w_edge = compute_edge_pos_weight(train_hads, device)
+print(f"Node pos weight: {pos_w_node}")
+print(f"Edge pos weight: {pos_w_edge.item():.2f}")
+model = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64, heads=2).to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     """Focal loss to emphasize hard-to-classify samples"""
@@ -102,321 +145,432 @@ def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     loss = alpha * focal_weight * bce_loss
     return loss.mean()
 
-def contrastive_loss(x1, x2, temperature=0.5):
-    """Compute the contrastive loss"""
-    x1 = F.normalize(x1, dim=1)
-    x2 = F.normalize(x2, dim=1)
-
-    batch_size = x1.size(0)
-
-    similarity_matrix = torch.mm(x1, x2.t()) / temperature
-
-    labels = torch.arange(batch_size).to(x1.device)
-
-    loss = F.cross_entropy(similarity_matrix, labels)
-
-    return loss
-
-def drop_edges(edge_index, edge_attr, drop_percent):
-    num_edges = edge_index.size(1)
-    num_keep = int(num_edges * (1 - drop_percent))
-
-    # Generate random permutation of indices and keep the first num_keep
-    perm = torch.randperm(num_edges, device=edge_index.device)[:num_keep]
-
-    # Apply permutation to keep a subset of edges
-    new_edge_index = edge_index[:, perm]
-    new_edge_attr = edge_attr[perm] 
-
-    return new_edge_index, new_edge_attr
-
-def compute_class_weights(labels):
-    """Dynamically compute class weights based on dataset distribution."""
-    num_pos = labels.sum().item()
-    num_neg = len(labels) - num_pos
-    pos_weight = num_neg / (num_pos + 1e-8)  # Avoid divide-by-zero
-    return pos_weight
-
 #TRAIN
-def train(model, train_loader, optimizer, device, epoch, gamma=2.0):
+def train(model, train_loader, optimizer, device,
+          node_loss_weight=1.0, edge_loss_weight=0.5):
+
     model.to(device)
     model.train()
-    total_loss=0
-    total_node_loss = 0
-    all_gate_values = []
 
-    for data in tqdm(train_loader, desc="Training", unit="Batch"):
-        data= data.to(device)
+    total_loss = 0.0
+    total_node_loss = 0.0
+    total_edge_loss = 0.0
+    batch_count = 0
 
+    # -------------------------------
+    # Loss functions
+    # -------------------------------
+    ce_loss_fn  = torch.nn.CrossEntropyLoss(weight=pos_w_node)
+    bce_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w_edge)
+
+    for batch in tqdm(train_loader, desc="Training", unit="Batch"):
+        batch = batch.to(device)
         optimizer.zero_grad()
-        num_nodes = data.x.size(0)
-        
-        node_embeds1, preds1, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
-        node_loss = loss_fn(preds1.squeeze(0), data.y.float().unsqueeze(1))
 
-        batch_had_weight = data.had_weight[data.batch].mean().to(device)
+        # Forward pass
+        node_logits, edge_logits, *_ = model(
+            batch.x,
+            batch.edge_index,
+            batch.edge_attr
+        )
 
-        loss = node_loss
+        # Convert one-hot → integer labels
+        node_labels = batch.y.argmax(dim=1).long()
 
+        # Node loss (class-weighted CE)
+        node_loss = ce_loss_fn(node_logits, node_labels)
+
+        # Edge loss (binary)
+        if batch.edge_index.size(1) > 0:
+            edge_loss = bce_loss_fn(edge_logits.view(-1), batch.edge_y.float())
+        else:
+            edge_loss = torch.tensor(0.0, device=device)
+
+        # Combined weighted loss
+        loss = node_loss_weight * node_loss + edge_loss_weight * edge_loss
+
+        # Backprop
         loss.backward()
         optimizer.step()
-        #scheduler.step()
 
-        total_loss      += loss.item()
+        num_nodes = batch.x.size(0)
+        num_edges = batch.edge_index.size(1)
+        denom = max(1, num_nodes + num_edges)
+
+        total_loss_batch = (
+            node_loss.item() * num_nodes +
+            edge_loss_weight * edge_loss.item() * num_edges
+        ) / denom
+
+
+        # Stats
+        total_loss      += total_loss_batch
         total_node_loss += node_loss.item()
-        #all_gate_values.append(model.last_gate.mean().item())
+        total_edge_loss += edge_loss.item()
+        batch_count += 1
 
-    avg_loss = total_loss / len(train_loader)
-    avg_node_loss = total_node_loss / len(train_loader)
-    #avg_gate_val = sum(all_gate_values) / len(all_gate_values)
+    # Averages
+    return (
+        total_loss      / batch_count,
+        total_node_loss / batch_count,
+        total_edge_loss / batch_count
+    )
 
-    #print(f"No seed hadrons: {nosigseeds}")
-    return avg_loss, avg_node_loss
 
 #TEST
-def test(model, test_loader, device, epoch, k=11, thres=0.5):
+def test(model, test_loader, device, thres=0.5):
     model.to(device)
     model.eval()
+    
+    ce_loss_fn  = torch.nn.CrossEntropyLoss()
+    bce_loss_fn = torch.nn.BCEWithLogitsLoss()
 
-    correct_bkg = 0
-    total_bkg = 0
-    correct_signal = 0
-    total_signal = 0
-    total_loss = 0
-    mean_sig_prob = []
-    mean_bkg_prob = []
-    all_preds = []
-    all_labels = []
-    #nosigtest = 0
+    total_node_loss = 0.0
+    total_edge_loss = 0.0
+    total_batches = 0
+
+    # Storage for metrics
+    all_node_probs = []
+    all_node_labels = []
+
+    all_edge_probs = []
+    all_edge_labels = []
+
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing", unit="Batch"):
             batch = batch.to(device)
-            num_nodes = batch.x.size(0)
+
+            node_logits, edge_logits, node_probs, edge_probs = model(
+                batch.x,
+                batch.edge_index,
+                batch.edge_attr
+            )
+
+            node_labels = batch.y.argmax(dim=1).long()
+
+            node_logits = node_logits.squeeze(0)      # [N,7]
+            node_probs  = node_probs.squeeze(0)       # [N,7]
+            edge_logits = edge_logits.squeeze(0)      # [E,1]
+            edge_probs  = edge_probs.squeeze(0)       # [E,1]
             
-            #batch.x = scale_features(batch.x, scale_mean, scale_std)
-            
-            #edge_index = knn_graph(batch.x, k=k, batch=batch.batch, loop=False, cosine=False, flow="source_to_target").to(device)
+            node_loss = ce_loss_fn(node_logits, node_labels)
+            edge_loss = bce_loss_fn(edge_logits.view(-1), batch.edge_y.float())
 
-            _, logits, *_ = model(batch.x.unsqueeze(0), batch.edge_index.unsqueeze(0), batch.edge_attr.unsqueeze(0))
-            #_, logits, *_ = model(batch.x, batch.edge_index, batch.edge_attr)
-            preds = torch.sigmoid(logits).squeeze(0)
+            total_node_loss += node_loss.item()
+            total_edge_loss += edge_loss.item()
+            total_batches   += 1
 
-            all_preds.extend(preds.squeeze().cpu().numpy())
-            all_labels.extend(batch.y.cpu().numpy())
+            # Store full softmax output (needed for OvR AUC)
+            all_node_probs.append(node_probs.cpu())      # [N,7]
+            all_node_labels.append(batch.y.cpu())        # [N,7]
 
-            batch_loss = F.binary_cross_entropy(preds, batch.y.float().unsqueeze(1))
-            total_loss += batch_loss.item()
+            # Store edge results
+            all_edge_probs.append(edge_probs.cpu().view(-1))
+            all_edge_labels.append(batch.edge_y.cpu().view(-1))
 
-            signal_mask = (batch.y == 1)  # Mask for signal nodes
-            background_mask = (batch.y == 0)
+    all_node_probs  = torch.cat(all_node_probs, dim=0).numpy()   # [TotalN,7]
+    all_node_labels = torch.cat(all_node_labels, dim=0).numpy()  # [TotalN,7]
 
-            #mean_sig_prob.append(preds[signal_mask].mean().item())
-            #mean_bkg_prob.append(preds[background_mask].mean().item())
+    all_edge_probs  = torch.cat(all_edge_probs, dim=0).numpy()
+    all_edge_labels = torch.cat(all_edge_labels, dim=0).numpy()
 
-            preds = (preds > thres).float().squeeze()
+    # =============================
+    # Metrics: Node AUC (OvR)
+    # =============================
+    true_class = all_node_labels.argmax(axis=1)  # integer labels
 
-            # Signal-specific accuracy
-            correct_signal += (preds[signal_mask] == batch.y[signal_mask].float()).sum().item()
-            total_signal += signal_mask.sum().item()
+    num_classes = all_node_probs.shape[1]
+    
+    y_true_onehot = label_binarize(
+        true_class,
+        classes=np.arange(num_classes)
+    )
 
-            correct_bkg += (preds[background_mask] == batch.y[background_mask].float()).sum().item()
-            total_bkg += background_mask.sum().item()
+    node_auc = roc_auc_score(
+        y_true_onehot,
+        all_node_probs,          # full 7-dim probabilities
+        multi_class="ovr",
+        average=None             # returns vector of per-class AUC
+    )
 
-            #print(f"Predictions: {preds}")
-            #print(f"True labels: {batch.y}")
-            #print(f"Signal Mask: {signal_mask}")
-            #print(f"Correct Signal: {correct_signal}, Total Signal: {total_signal}")
-            #print(f"Correct total: {correct}, Total: {total}")
+    # =============================
+    # Metrics: Node accuracy
+    # =============================
+    pred_class = all_node_probs.argmax(axis=1)
+    node_accuracy = accuracy_score(true_class, pred_class)
 
-    bkg_accuracy = correct_bkg / total_bkg if total_bkg > 0 else 0
-    sig_accuracy = correct_signal / total_signal if total_signal > 0 else 0
-    avg_loss = total_loss / len(test_loader) if len(test_loader) > 0 else 0
-    auc = roc_auc_score(all_labels, all_preds)
-    #print(f"No sig hadrons test sample: {nosigtest}")
-    #print("Mean signal probs per had", mean_sig_prob)
-    #print("Mean background probs per had", mean_bkg_prob)
+    # =============================
+    # Metrics: Edge AUC and Acc
+    # =============================
+    edge_auc = roc_auc_score(all_edge_labels, all_edge_probs)
+    edge_pred = (all_edge_probs > 0.5).astype(int)
+    edge_accuracy = accuracy_score(all_edge_labels, edge_pred)
 
-    return bkg_accuracy, sig_accuracy, avg_loss, auc
+    return {
+        "node_loss": total_node_loss / total_batches,
+        "edge_loss": total_edge_loss / total_batches,
+        "node_accuracy": node_accuracy,
+        "node_auc": node_auc,          # vector of 7 per-class AUCs
+        "edge_accuracy": edge_accuracy,
+        "edge_auc": edge_auc,
+    }
 
-def validate(model, val_graphs, device, epoch, k=6, target_sigeff=0.70):
-    model.to(device)
+def validate(model, val_loader, device):
     model.eval()
+    model.to(device)
 
-    all_preds = []
-    all_labels = []
-    total_loss = 0
-    num_samps = 0
+    ce_loss_fn  = torch.nn.CrossEntropyLoss()
+    bce_loss_fn = torch.nn.BCEWithLogitsLoss()
 
-    for i, data in enumerate(val_graphs):
-        with torch.no_grad():
-            try:
-                data = data.to(device)
-                #edge_index = knn_graph(data.x, k=k, batch=None, loop=False, cosine=False, flow="source_to_target").to(device)
-                _, logits, *_ = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
-                #_, logits, *_ = model(data.x, data.edge_index, data.edge_attr)
-                preds = torch.sigmoid(logits).squeeze(0)
-                preds = preds.squeeze()
-                logits_cpu = logits.detach().cpu()
-                preds_cpu = preds.detach().cpu()
-                #labels = data.y.float()
-                siginds = data.siginds.cpu().numpy()
-                #labels = np.zeros(len(preds))
-                labels = torch.zeros(len(preds), device=device)
-                labels[siginds] = 1  # Set signal indices to 1
-                evt_loss = F.binary_cross_entropy(preds, labels)
-                total_loss += evt_loss.item()
-                num_samps +=1
-            except Exception as e:
-                print(f"\n Exception at val batch {i}")
-                print(f"data.x: {data.x.shape}, edge_index: {data.edge_index.shape}")
-                print("logits stats:", logits_cpu.min().item(), logits_cpu.max().item())
-                print("preds stats:", preds_cpu.min().item(), preds_cpu.max().item())
-                print("any NaNs in preds:", torch.isnan(preds_cpu).any().item())
-                print("any > 1 in preds:", (preds_cpu > 1).any().item())
-                print("any < 0 in preds:", (preds_cpu < 0).any().item())
-                print(f"siginds max: {siginds.max()}, preds len: {len(preds_cpu)}")
-                print("siginds:", siginds)
+    total_node_loss = 0.0
+    total_edge_loss = 0.0
+    total_batches   = 0
 
-                # You can comment this next line if grad norm isn't essential
-                grad_norm = sum((p.grad.norm().item() if p.grad is not None else 0.0) for p in model.parameters())
-                print("grad norm:", grad_norm)
+    all_node_probs  = []
+    all_node_labels = []
 
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
+    all_edge_probs  = []
+    all_edge_labels = []
 
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
+    with torch.no_grad():
+        for batch in val_loader:
+            batch = batch.to(device)
 
-    fpr, tpr, thresholds_roc = roc_curve(all_labels, all_preds)
-    roc_auc = auc(fpr, tpr)
+            # Forward pass
+            node_logits, edge_logits, node_probs, edge_probs = model(
+                batch.x,
+                batch.edge_index,
+                batch.edge_attr
+            )
 
-    precision, recall, thresholds = precision_recall_curve(all_labels, all_preds)
-    pr_auc = auc(recall, precision)
+            # Remove batch dimension
+            node_logits = node_logits.squeeze(0)   # [N,7]
+            node_probs  = node_probs.squeeze(0)    # [N,7]
+            edge_logits = edge_logits.squeeze(0)   # [E,1]
+            edge_probs  = edge_probs.squeeze(0)    # [E,1]
 
-    target_idx = np.argmin(np.abs(tpr - target_sigeff))
-    threshold_at_target_eff = thresholds_roc[target_idx]
+            # Convert one-hot → integer labels
+            node_labels = batch.y.argmax(dim=1).long()
 
-    precision_at_sigeff = precision[np.argmin(np.abs(recall - tpr[target_idx]))]
-    bg_rejection_at_sigeff = 1 - fpr[target_idx]  # 1 - FPR
+            # Loss
+            node_loss = ce_loss_fn(node_logits, node_labels)
+            edge_loss = bce_loss_fn(edge_logits.view(-1), batch.edge_y.float())
 
-    avg_loss = total_loss / num_samps if num_samps > 0 else 0
+            total_node_loss += node_loss.item()
+            total_edge_loss += edge_loss.item()
+            total_batches   += 1
 
-    return roc_auc, pr_auc, avg_loss, precision_at_sigeff, bg_rejection_at_sigeff
+            # Store probabilities
+            all_node_probs.append(node_probs.cpu())
+            all_node_labels.append(batch.y.cpu())
+
+            all_edge_probs.append(edge_probs.cpu().view(-1))
+            all_edge_labels.append(batch.edge_y.cpu().view(-1))
+
+    # Stack results
+    all_node_probs  = torch.cat(all_node_probs, dim=0).numpy()   # [TotalN, 7]
+    all_node_labels = torch.cat(all_node_labels, dim=0).numpy()  # [TotalN, 7]
+
+    all_edge_probs  = torch.cat(all_edge_probs, dim=0).numpy()
+    all_edge_labels = torch.cat(all_edge_labels, dim=0).numpy()
+
+    # Convert one-hot → integer
+    true_class = all_node_labels.argmax(axis=1)
+
+    num_classes = all_node_probs.shape[1]
+    y_true_onehot = label_binarize(
+        true_class,
+        classes=np.arange(num_classes)
+    )
+
+    # Node ROC AUC (multi-class OvR)
+    node_auc = roc_auc_score(
+        y_true_onehot,
+        all_node_probs,
+        multi_class="ovr",
+        average=None
+    )
+
+    # Edge AUC
+    edge_auc = roc_auc_score(all_edge_labels, all_edge_probs)
+
+    return {
+        "node_loss": total_node_loss / total_batches,
+        "edge_loss": total_edge_loss / total_batches,
+        "node_auc": node_auc,
+        "edge_auc": edge_auc,
+    }
+
+# Class name mapping for nicer output
+CLASS_NAMES = {
+    0: "primary",
+    1: "pileup",
+    2: "fromB",
+    3: "fromBC",
+    4: "fromC",
+    5: "other",
+    6: "fake"
+}
 
 best_metric = -1
 patience = 8
 no_improve = 0
 val_every = 10
-#gamma_min = 1.0
-#gamma_max = 2.9
 
 stats = {
     "epochs": [],
-    "best_epoch": {
-        "epoch": None,
-        "total_loss": None,
-        "node_loss": None,
-        "bkg_acc": None,
-        "sig_acc": None,
-        "test_auc": None,
-        "test_loss": None,
-        "total_acc": None,
-        "val_auc": None,
-        "val_loss": None,
-        "pr_auc": None,
-        "precision": None,
-        "bg_rejection": None,
-        "metric": None
-    }
+    "best_epoch": {}
 }
 
 for epoch in range(int(args.epochs)):
-    #gamma = float(gamma_max * (epoch / int(args.epochs)))
-    #progress = epoch / (int(args.epochs) - 1)
-    #gamma = gamma_min + (gamma_max - gamma_min) * (1 - math.cos(math.pi * progress)) / 2
 
-    tot_loss, node_loss = train(model, train_loader,  optimizer, device, epoch)
+    # -------------------------
+    # Train
+    # -------------------------
+    train_tot_loss, train_node_loss, train_edge_loss = train(
+        model, train_loader, optimizer, device, epoch
+    )
 
+    print(f"[Train] Total Loss: {train_tot_loss:.4f} | "
+          f"Node Loss: {train_node_loss:.4f} | "
+          f"Edge Loss: {train_edge_loss:.4f}")
 
-    bkg_acc, sig_acc, test_loss, test_auc = test(model, test_loader,  device, epoch, k=12, thres=glob_test_thres)
-    sum_acc = bkg_acc + sig_acc
+    # -------------------------
+    # Test metrics
+    # -------------------------
+    test_results = test(model, test_loader, device)
+    test_node_auc = test_results["node_auc"]  # dict class → auc
+    test_edge_auc = test_results["edge_auc"]
+    test_node_loss = test_results["node_loss"]
+    test_edge_loss = test_results["edge_loss"]
 
-    val_auc = -1
-    val_loss = 1e6
-    pr_auc = -1
-    prec = -1
-    bg_rej = -1
-    metric = -1
+    avg_test_node_auc = np.nanmean(test_node_auc)
 
-    if (epoch+1) % val_every == 0:
-        print(f"Validating at epoch {epoch}...")
-        val_auc, pr_auc, val_loss, prec, bg_rej = validate(model, val_evts, device, epoch, k=12, target_sigeff=0.70)
-        print(f"Val AUC: {val_auc:.4f}, Val Loss: {val_loss:.4f}") 
+    print(f"[Test] Node Loss: {test_node_loss:.4f} | "
+          f"Edge Loss: {test_edge_loss:.4f}")
 
-        metric = val_auc
+    print(f"[Test] Edge AUC: {test_edge_auc:.4f}")
+    print("[Test] Node AUC per class:")
 
-        if metric > best_metric:
-            best_metric = metric
+    label_names = [
+        "Hard", "PU  ", "B   ", "BtoC", "C   ",
+        "Oth ", "Fake"
+    ]
+
+    for i, name in enumerate(label_names):
+        print(f"    {name}: {test_node_auc[i]:.4f}")
+
+    print(f"[Test] Avg Node AUC: {avg_test_node_auc:.4f}")
+
+    # -------------------------
+    # Validation
+    # -------------------------
+    if (epoch + 1) % val_every == 0:
+        print(f"\nValidating at epoch {epoch}...")
+
+        val_results = validate(model, val_loader, device)
+
+        val_node_auc = val_results["node_auc"]
+        val_edge_auc = val_results["edge_auc"]
+        val_node_loss = val_results["node_loss"]
+        val_edge_loss = val_results["edge_loss"]
+
+        avg_val_node_auc = np.nanmean(val_node_auc)
+
+        print(f"[Val] Node Loss: {val_node_loss:.4f} | "
+              f"Edge Loss: {val_edge_loss:.4f}")
+        print(f"[Val] Edge AUC: {val_edge_auc:.4f}")
+        print("[Val] Node AUC per class:")
+
+        for i, name in enumerate(label_names):
+            print(f"    {name}: {val_node_auc[i]:.4f}")
+
+        print(f"[Val] Avg Node AUC: {avg_val_node_auc:.4f}")
+
+        # --------------------------------------------
+        # Compute BEST METRIC = average of edge AUC + classes 2,3,4 node AUC
+        # --------------------------------------------
+        important_classes = [2, 3, 4]
+
+        val_metric = (
+            sum(val_node_auc[c] for c in important_classes) + val_edge_auc
+        ) / (len(important_classes) + 1)
+
+        print(f"[Val] Combined Metric: {val_metric:.4f}")
+
+        # Check improvement
+        if val_metric > best_metric:
+            print(">>> New BEST model found! Saving checkpoint.")
+
+            best_metric = val_metric
             no_improve = 0
 
-            stats["best_epoch"] = {
+            best_epoch_stats = {
                 "epoch": epoch + 1,
-                "total_loss": tot_loss,
-                "node_loss": node_loss,
-                "bkg_acc": bkg_acc,
-                "sig_acc": sig_acc,
-                "test_auc": test_auc,
-                "test_loss": test_loss,
-                "total_acc": sum_acc,
-                "val_auc": val_auc,
-                "val_loss": val_loss,
-                "pr_auc": pr_auc,
-                "precision": prec,
-                "bg_rejection": bg_rej,
-                "metric": metric
+                "train_tot_loss": train_tot_loss,
+                "train_node_loss": train_node_loss,
+                "train_edge_loss": train_edge_loss,
+                "test_node_loss": test_node_loss,
+                "test_edge_loss": test_edge_loss,
+                "val_node_loss": val_node_loss,
+                "val_edge_loss": val_edge_loss,
+                "test_edge_auc": test_edge_auc,
+                "val_edge_auc": val_edge_auc,
+                "best_metric": val_metric,
             }
 
+            # Add node AUCs for each class to best stats
+            for c in CLASS_NAMES:
+                best_epoch_stats[f"test_auc_{CLASS_NAMES[c]}"] = test_node_auc[c]
+                best_epoch_stats[f"val_auc_{CLASS_NAMES[c]}"] = val_node_auc[c]
+
+            stats["best_epoch"] = best_epoch_stats
+
+            # Save model
             save_path = os.path.join("model_files", f"model_{args.modeltag}_best.pth")
             torch.save(model.state_dict(), save_path)
-            print(f"Model saved to {save_path}")
+            print(f"Saved best model → {save_path}")
 
         else:
             no_improve += 1
-            print(f"Validation metric did not improve after {val_every} epochs")
+            print("No improvement in validation metric.")
 
+        # Early stopping
         if no_improve >= patience:
-            print(f"Early stopping triggered after {patience*val_every} epochs of no improvement.")
+            print(f"\nEARLY STOPPING after {patience} validations without improvement.")
             break
 
+    # -------------------------
+    # Save per-epoch stats
+    # -------------------------
     epoch_stats = {
         "epoch": epoch + 1,
-        "total_loss": tot_loss,
-        "node_loss": node_loss,
-        "bkg_acc": bkg_acc,
-        "sig_acc": sig_acc,
-        "test_auc": test_auc,
-        "test_loss": test_loss,
-        "total_acc": sum_acc,
-        "val_auc": val_auc,
-        "val_loss": val_loss,
-        "pr_auc": pr_auc,
-        "precision": prec,
-        "bg_rejection": bg_rej,
-        "metric": metric
+        "train_tot_loss": train_tot_loss,
+        "train_node_loss": train_node_loss,
+        "train_edge_loss": train_edge_loss,
+        "test_node_loss": test_node_loss,
+        "test_edge_loss": test_edge_loss,
+        "test_edge_auc": test_edge_auc,
+        "metric": best_metric
     }
+
+    # Add AUCs for each class to epoch stats
+    for c in CLASS_NAMES:
+        epoch_stats[f"test_auc_{CLASS_NAMES[c]}"] = test_node_auc[c]
+
     stats["epochs"].append(epoch_stats)
-    
-    print(f"Epoch {epoch+1}/{args.epochs}, Total Loss: {tot_loss:.4f}")
-    print(f"Bkg Acc: {bkg_acc*100:.4f}%, Sig Acc: {sig_acc*100:.4f}%, Test AUC: {test_auc:.4f}, Test Loss: {test_loss:.4f}")
 
-
-    if(epoch> 0 and epoch%10==0):
-        savepath = os.path.join("model_files", f"model_{args.modeltag}_e{epoch}.pth")
-        torch.save(model.state_dict(), savepath)
-        print(f"Model saved to {savepath}")
-
-    
-    with open("training_stats_"+args.modeltag+".json", "w") as f:
+    # Save stats every epoch
+    with open("training_stats_" + args.modeltag + ".json", "w") as f:
         json.dump(stats, f, indent=4)
+
+    # Periodic checkpoint
+    if epoch > 0 and epoch % 10 == 0:
+        ckpt = os.path.join("model_files", f"model_{args.modeltag}_e{epoch}.pth")
+        torch.save(model.state_dict(), ckpt)
+        print(f"Checkpoint saved → {ckpt}")
+
+
+    
 

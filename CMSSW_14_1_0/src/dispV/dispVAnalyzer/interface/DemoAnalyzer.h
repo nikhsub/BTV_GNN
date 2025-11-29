@@ -99,9 +99,8 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       virtual void beginStream(edm::StreamID) override;
       virtual void analyze(const edm::Event&, const edm::EventSetup&) override;
       //virtual void endJob() override;
-      std::optional<std::tuple<float, float, float>> isAncestor(const reco::Candidate * ancestor, const reco::Candidate * particle);
       int checkPDG(int abs_pdg);
-      bool hasDescendantWithDigit(const reco::Candidate* particle, int);
+      int getDaughterLabel(const reco::GenParticle *);
       bool isGoodVtx(TransientVertex &);
       std::vector<TransientVertex> TrackVertexRefit(std::vector<reco::TransientTrack> &, std::vector<TransientVertex> &);
       void vertexMerge(std::vector<TransientVertex> &, double, double );
@@ -156,8 +155,9 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<int> nDaughters_B;
       std::vector<int> nDaughters_S;
       std::vector<int> nDaughters_D;
-      std::vector<int> Daughters_flag;
+      std::vector<int> Daughters_hadidx;
       std::vector<int> Daughters_flav;
+      std::vector<int> Daughters_label;
       std::vector<float> Daughters_pt;
       std::vector<float> Daughters_eta;
       std::vector<float> Daughters_phi;

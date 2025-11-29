@@ -17,11 +17,9 @@ parser.add_argument("-s", "--start", default=0, help="Evt # to start from")
 parser.add_argument("-e", "--end", default=3000, help="Evt # to end with")
 parser.add_argument("-t", "--test", default=False, action="store_true", help="Creating test dataset?")
 args = parser.parse_args()
+    
+trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt','trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 
-                'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
-edge_feature_names = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1',
-                      'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
 # Load entire dataset for all features in one go
 print("Loading files...")
@@ -29,17 +27,12 @@ with uproot.open(args.data) as f:
     datatree = f['tree']
 
 num_evts = datatree.num_entries
+num_classes = 7
+
 print("NUMEVTS", num_evts)
 
 # Preload arrays for all events for faster access in loops
 trk_data = {feat: datatree[feat].array() for feat in trk_features}
-sig_ind_array = datatree['sig_ind'].array()
-sig_flag_array = datatree['sig_flag'].array()
-#bkg_flag_array = datatree['bkg_flag'].array()
-#bkg_ind_array = datatree['bkg_ind'].array()
-#seed_array = datatree['seed_ind'].array()
-SV_ind_array = datatree['SVtrk_ind'].array()
-had_pt_array = datatree['had_pt'].array()
 trk_1_array  = datatree['trk_1'].array()
 trk_2_array  = datatree['trk_2'].array()
 deltaR_array  = datatree['deltaR'].array()
@@ -53,7 +46,13 @@ dotprod_2_array  = datatree['dotprod_2'].array()
 pair_mom_array  = datatree['pair_mom'].array()
 pair_invmass_array  = datatree['pair_invmass'].array()
 
-def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds):
+SV_ind_array = datatree['SVtrk_ind'].array()
+
+trk_label_array  = datatree["trk_label"].array()     # 0-6
+trk_hadidx_array = datatree["trk_hadidx"].array()    # hadron index
+trk_flav_array   = datatree["trk_flav"].array()      # -1, 1, 2, 3, 4, 5
+
+def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav):
     """
     Create edge index and edge features for tracks in val_comb_inds using DCA-based clustering.
     
@@ -74,7 +73,6 @@ def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1,
     pair_invmass_np = pair_invmass.to_numpy()
 
     # Filter based on val_comb_inds (valid track indices)
-    valid_edge_mask = np.isin(trk_1_np, val_comb_inds) & np.isin(trk_2_np, val_comb_inds)
     
     feature_mask = (
         (cptopv_np < 50) &
@@ -85,7 +83,7 @@ def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1,
         (pair_invmass_np < 10)
     )
     
-    final_mask = valid_edge_mask & feature_mask
+    final_mask = feature_mask
 
     # Extract valid edges and their features
     edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
@@ -94,9 +92,15 @@ def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1,
                                 pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], 
                                 dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
 
-    return edge_index, edge_features
+    edge_labels = (
+        (trk_hadidx[trk_1_np[final_mask]] == trk_hadidx[trk_2_np[final_mask]])
+        & (trk_flav[trk_1_np[final_mask]] == trk_flav[trk_2_np[final_mask]])
+        & (trk_hadidx[trk_1_np[final_mask]] >= 0)
+    ).astype(np.float32)
 
-def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds, cptopv_thres=50):
+    return edge_index, edge_features, edge_labels
+
+def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav, cptopv_thres=50):
 
     trk_1_np = trk_1.to_numpy()
     trk_2_np = trk_2.to_numpy()
@@ -111,17 +115,13 @@ def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1
     pair_mom_np = pair_mom.to_numpy()
     pair_invmass_np = pair_invmass.to_numpy()
 
-    # Filter based on val_comb_inds (valid track indices)
-    valid_edge_mask = np.isin(trk_1_np, val_comb_inds) & np.isin(trk_2_np, val_comb_inds)
-
-
     # Combine both masks
     feature_mask = (
     (cptopv_np < cptopv_thres) &
     (pair_mom_np < 100)
     )
 
-    final_mask = valid_edge_mask & feature_mask
+    final_mask = feature_mask
 
     # Extract valid edges and their features
     edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
@@ -129,10 +129,16 @@ def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1
                                dca_sig_np[final_mask], cptopv_np[final_mask],
                                 pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
 
-    return edge_index, edge_features
+    edge_labels = (
+        (trk_hadidx[trk_1_np[final_mask]] == trk_hadidx[trk_2_np[final_mask]])
+        & (trk_flav[trk_1_np[final_mask]] == trk_flav[trk_2_np[final_mask]])
+        & (trk_hadidx[trk_1_np[final_mask]] >= 0)
+    ).astype(np.float32)
 
-def create_dataobj(trk_data, sig_ind_array, sig_flag_array, 
-                   SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+    return edge_index, edge_features, edge_labels
+
+def create_dataobj(trk_data, SV_ind_array, trk_label_array, trk_hadidx_array, trk_flav_array, 
+                   trk_1_array, trk_2_array, deltaR_array,
                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features, nevts=3):
 
@@ -141,21 +147,24 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array,
     if (int(args.end) == -1): end = num_evts
     else: end = int(args.end)
     
-    dummy_values = np.array([-999.0] * 8 + [-1.0] * 3 + [-3.0], dtype=np.float32)  # Customize per feature
+    dummy_values = np.array([-999.0] * 10 + [-1.0] * 3 + [-3.0], dtype=np.float32)  # Customize per feature
 
     for evt in range(int(args.start), end):
         print(evt)
-        evt_features = {f: trk_data[f][evt] for f in trk_features}
-        fullfeatmat = np.stack([evt_features[f] for f in trk_features], axis=1)
-        fullfeatmat = np.array(fullfeatmat, dtype=np.float32)
-        
-        mask = ~np.isfinite(fullfeatmat)
-        fullfeatmat[mask] = np.broadcast_to(dummy_values, fullfeatmat.shape)[mask]
 
-        valid_indices = np.arange(len(fullfeatmat))
-        val_inds_map = {ind: ind for ind in valid_indices}  # Identity map
-    
-        evtsiginds = list(set(sig_ind_array[evt]))
+         # --- build the full feature matrix ---
+        evt_features = np.stack([np.asarray(trk_data[f][evt]) for f in trk_features], axis=1).astype(np.float32)
+
+        # --- replace non-finite values with dummy pattern ---
+        mask = ~np.isfinite(evt_features)
+        if mask.any():
+            evt_features[mask] = np.broadcast_to(dummy_values, evt_features.shape)[mask]
+
+        ntrk = len(evt_features)
+        if ntrk == 0:
+            continue
+
+        ivfinds = list(set(SV_ind_array[evt]))
 
         trk_1 = trk_1_array[evt]
         trk_2 = trk_2_array[evt]
@@ -169,57 +178,52 @@ def create_dataobj(trk_data, sig_ind_array, sig_flag_array,
         dotprod_2 = dotprod_2_array[evt]
         pair_mom = pair_mom_array[evt]
         pair_invmass = pair_invmass_array[evt]
+
+        trk_labels_evt = np.array(trk_label_array[evt], dtype=np.int64)
+        trk_hadidx_evt = np.array(trk_hadidx_array[evt], dtype=np.int64)
+        trk_flav_evt   = np.array(trk_flav_array[evt], dtype=np.int64)
             
-        evtsigflags = [sig_flag_array[evt][np.where(sig_ind_array[evt] == ind)[0][0]] for ind in evtsiginds]
-        #evtbkginds = list(set(bkg_ind_array[evt]))
-        #evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
-        evtsvinds = list(set(SV_ind_array[evt]))
-
-        # Adjust valid indices for masking
-        evtsiginds = [val_inds_map[ind] for ind in evtsiginds if ind in val_inds_map]
-
         if(not args.test):
-            if(len(evtsiginds) < 3) : continue
+            hf_mask = np.isin(trk_labels_evt, [2, 3, 4]) #Skippinig events that don't have atleast two heavy flavour tracks
+            num_hf = np.sum(hf_mask)
+            if num_hf < 2:
+            # keep only certain fraction of these events
+                if np.random.rand() > 0.2:
+                    continue
 
-        #evtbkginds = [val_inds_map[ind] for ind in evtbkginds if ind in val_inds_map]
-        evtsvinds  = [val_inds_map[ind] for ind in evtsvinds if ind in val_inds_map]
-        evtsigflags = [flag for ind, flag in zip(sig_ind_array[evt], evtsigflags) if ind in valid_indices]
-        
     
         if not(args.test):
-            edge_index, edge_features = create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices)
+            edge_index, edge_features, edge_labels = create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
         else:
-            edge_index, edge_features = create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices,cptopv_thres=100)
+            edge_index, edge_features, edge_labels = create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt, cptopv_thres=100)
     
         if edge_index.shape[1] == 0:
             continue
-        
-        edge_index = np.vectorize(val_inds_map.get)(edge_index)
+    
+        y_onehot = np.eye(num_classes, dtype=np.float32)[trk_labels_evt]
 
-        evt_data = Data(
-            evt=evt,
-            #seeds=torch.tensor(seeds, dtype=torch.int16),
-            x=torch.tensor(fullfeatmat, dtype=torch.float),
-            siginds=torch.tensor(evtsiginds, dtype=torch.int16),
-            sigflags=torch.tensor(evtsigflags, dtype=torch.int16),
-            svinds=torch.tensor(evtsvinds, dtype=torch.int16),
-            edge_index=torch.tensor(edge_index, dtype=torch.float),
-            edge_attr=torch.tensor(edge_features, dtype=torch.float) 
+        evt_graph = Data(
+            x=torch.tensor(evt_features, dtype=torch.float),
+            y=torch.tensor(y_onehot, dtype=torch.float),     # node labels
+            edge_index=torch.tensor(edge_index, dtype=torch.long),
+            edge_attr=torch.tensor(edge_features, dtype=torch.float),
+            edge_y=torch.tensor(edge_labels, dtype=torch.float),    # edge labels
+            ivf_inds=torch.tensor(ivfinds, dtype=torch.int16)
         )
-        print("X", fullfeatmat.shape)
+        
+        print("X", evt_features.shape)
         print("edgeindex", edge_index.shape)
         print("edgefeat", edge_features.shape)
+        print("y", trk_labels_evt.shape) 
+        print("edgey", edge_labels.shape)
+        print("ivfinds", ivfinds)
         print("Contains NaNs:", np.isnan(edge_features).any())
-        evt_objects.append(evt_data)
+        evt_objects.append(evt_graph)
 
     return evt_objects
 
 print("Creating data objects...")
-evt_data = create_dataobj(trk_data, sig_ind_array, sig_flag_array,
-                                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
-                                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
-                                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features)
+evt_data = create_dataobj(trk_data, SV_ind_array, trk_label_array, trk_hadidx_array, trk_flav_array, trk_1_array, trk_2_array, deltaR_array, dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array, dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features)
 
-print(f"Saving evt_data to evtvaldata_{args.save_tag}.pkl...")
-with open("evtvaldata_" + args.save_tag + ".pkl", 'wb') as f:
-    pickle.dump(evt_data, f)
+print(f"Saving evt_data to evtvaldata_{args.save_tag}.pt...")
+torch.save(evt_data, f"evtvaldata_{args.save_tag}.pt")

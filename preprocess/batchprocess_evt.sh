@@ -1,36 +1,53 @@
 #!/bin/bash
 
+# -----------------------------
 # Directory paths
-INPUT_DIR="/store/user/nvenkata/BTV/toproc_0209/"
-#INPUT_DIR="/uscms/home/nvenkata/nobackup/higgs+c/preprocess/toproc"
-OUTPUT_DIR="/uscms/home/nvenkata/nobackup/BTV/IVF/files/training/evt_ttbar_had_0309"  # Set your output directory for .pkl files
+# -----------------------------
+INPUT_DIR="/store/user/nvenkata/BTV/toproc_1111/"
+TMP_DIR="/uscms/home/nvenkata/nobackup/BTV/preprocess/tmp"
+OUTPUT_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311"
 EOS_PREFIX="root://cmseos.fnal.gov/"
-#EOS_PREFIX=""
 
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$TMP_DIR"
 
 # Parameters for event processing
 START_EVT=0
 END_EVT=-1
+DOWNSAMPLE=0.4
 
-# Loop through all ROOT files in the input directory
-#for file_path in "$INPUT_DIR"/*.root; do
-  # Extract file name without extension and set it as the save tag
-for file_path in $(xrdfsls "$INPUT_DIR" | grep '\.root$'); do
-#for file_path in "$INPUT_DIR"/*.root; do
-  filename=$(basename "$file_path")
-  save_tag="${filename%.root}"
+# -----------------------------
+# Define the per-file job function
+# -----------------------------
+process_file() {
+    local file_path="$1"
+    local filename
+    filename=$(basename "$file_path")
+    local save_tag="${filename%.root}"
 
-  mod_file_path="${EOS_PREFIX}${file_path}"
+    local mod_file_path="${EOS_PREFIX}${file_path}"
+    local local_out="${TMP_DIR}/evttraindata_${save_tag}.pt"
+    local eos_out="${OUTPUT_DIR}/evttraindata_${save_tag}.pt"
 
-  echo "$mod_file_path"
+    echo "Processing: $mod_file_path"
+    python process_evt.py -d "$mod_file_path" -st "$save_tag" -s "$START_EVT" -e "$END_EVT" -ds "$DOWNSAMPLE"
 
-  # Run the processing script with the required arguments
-  python process_evt.py -d "$mod_file_path" -st "$save_tag" -s "$START_EVT" -e "$END_EVT"
+    mv "evttraindata_${save_tag}.pt" "$TMP_DIR/" || exit 1
 
-  # Move the generated .pkl file to the output directory
-  mv "evttraindata_${save_tag}.pkl" "$OUTPUT_DIR/"
-done
+    echo "Copying to EOS..."
+    xrdcp -f "$local_out" "${EOS_PREFIX}${eos_out}" && rm -f "$local_out"
 
-echo "Processing complete. All .pkl files have been moved to $OUTPUT_DIR."
+    echo "Finished: $filename"
+    echo "--------------------------------------"
+}
+
+export -f process_file
+export TMP_DIR OUTPUT_DIR EOS_PREFIX START_EVT END_EVT DOWNSAMPLE
+
+# -----------------------------
+# Get file list and run in parallel
+# -----------------------------
+xrdfsls "$INPUT_DIR" | grep '\.root$' | \
+    parallel -j 8 process_file {}
+
+echo " All files processed and transferred to EOS: $OUTPUT_DIR"
 

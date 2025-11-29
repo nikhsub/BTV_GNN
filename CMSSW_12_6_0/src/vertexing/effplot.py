@@ -1,92 +1,118 @@
+#!/usr/bin/env python3
+from ROOT import *
+import os
+import subprocess
+import numpy as np
 import matplotlib.pyplot as plt
 
-# Thresholds
-thresholds = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-x_vals = list(range(len(thresholds)))  # numeric x positions
+# -------------------------------------------------------------
+# CONFIGURATION
+# -------------------------------------------------------------
+input_dir = "."  # directory containing ROOT files
+base_script = "newvertexcheck.py"  # your vertex check script
+root_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".root")])
 
-# -------------------------
-# One common track data
-# -------------------------
-one_IVF_eff  = [65.3, 65.3, 65.3, 65.3, 65.3, 65.3, 65.3, 65.3, 65.3]
-one_RECO_eff = [65.7, 65.7, 65.7, 65.1, 64.9, 64.8, 64.6, 64.2, 63.4]
-one_GEN_eff =  [64.6, 64.6, 64.6, 64.6, 64.6, 64.6, 64.6, 64.6, 64.6]
+# --- GEN efficiencies and fake rates (editable) ---
+num_files = len(root_files)
+GEN_eff  = [56.6] * num_files
+GEN_fake = [22.0] * num_files
 
-one_IVF_fake  = [57.4, 57.4, 57.4, 57.4, 57.4, 57.4, 57.4, 57.4, 57.4]
-one_RECO_fake = [58.9, 58.9, 58.9, 56.2, 55.0, 53.6, 51.9, 49.6, 46.1]
-one_GEN_fake  = [11.5, 11.5, 11.5, 11.5, 11.5, 11.5, 11.5, 11.5, 11.5]
+# -------------------------------------------------------------
+# STORAGE ARRAYS
+# -------------------------------------------------------------
+cut_values = []
+RECO_eff, IVF_eff = [], []
+RECO_fake, IVF_fake = [], []
 
-# -------------------------
-# Two common track data
-# -------------------------
-two_IVF_eff  = [55.1, 55.1, 55.1, 55.1, 55.1, 55.1, 55.1, 55.1, 55.1]
-two_RECO_eff = [54.8, 54.8, 54.7, 54.7, 54.7, 54.9, 54.9, 54.9, 54.5]
-two_GEN_eff  = [56.6, 56.6, 56.6, 56.6, 56.6, 56.6, 56.6, 56.6, 56.6]
+# -------------------------------------------------------------
+# LOOP OVER FILES, RUN SCRIPT, EXTRACT VALUES
+# -------------------------------------------------------------
+for f in root_files:
+    print(f"\n>>> Processing {f} ...")
 
-two_IVF_fake  = [64.1, 64.1, 64.1, 64.1, 64.1, 64.1, 64.1, 64.1, 64.1]
-two_RECO_fake = [65.7, 65.7, 65.1, 63.1, 62.0, 60.1, 59.0, 56.9, 53.6]
-two_GEN_fake  = [22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0, 22.0]
+    # Run your vertexcheck script
+    result = subprocess.run(
+        ["python3", base_script, "-i", os.path.join(input_dir, f)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
-# -------------------------
-# Plot 1: Efficiency (One common track)
-# -------------------------
-plt.figure(figsize=(7,5))
-plt.plot(x_vals, one_IVF_eff, 'o--', color='blue', label="IVF")
-plt.plot(x_vals, one_RECO_eff, 's-', color='red', label="RECO")
-plt.plot(x_vals, one_GEN_eff, 's-', color='orange', label="GEN")
-plt.xticks(x_vals, thresholds)
-plt.xlabel("Model threshold")
-plt.ylabel("Efficiency (%)")
-plt.title("Efficiency vs Threshold (One common track)")
+    lines = result.stdout.splitlines()
+    eff_r = eff_i = fake_r = fake_i = None
+
+    for i, line in enumerate(lines):
+        if "## RECO ##" in line:
+            eff_r = float(lines[i+1].split(":")[1])*100
+            fake_r = float(lines[i+2].split(":")[1])*100
+        if "## IVF ##" in line:
+            eff_i = float(lines[i+1].split(":")[1])*100
+            fake_i = float(lines[i+2].split(":")[1])*100
+
+    if None in (eff_r, eff_i, fake_r, fake_i):
+        print(f"⚠️ Warning: Could not parse metrics from {f}")
+        continue
+
+    # Extract cut value from filename (e.g. mod0p5cut → 0.5)
+    cut_str = f.split("mod")[1].split("cut")[0].replace("p", ".")
+    cut_val = float(cut_str)
+    cut_values.append(cut_val)
+
+    # Append metrics
+    RECO_eff.append(eff_r)
+    IVF_eff.append(eff_i)
+    RECO_fake.append(fake_r)
+    IVF_fake.append(fake_i)
+    
+# -------------------------------------------------------------
+# SORT BY CUT VALUE
+# -------------------------------------------------------------
+
+cut_values, RECO_eff, IVF_eff, GEN_eff, RECO_fake, IVF_fake, GEN_fake = zip(
+    *sorted(zip(
+        cut_values,
+        RECO_eff,
+        IVF_eff,
+        GEN_eff,
+        RECO_fake,
+        IVF_fake,
+        GEN_fake
+    ))
+)
+
+# -------------------------------------------------------------
+# PLOT 1: Efficiency vs Cut
+# -------------------------------------------------------------
+plt.figure(figsize=(8,6))
+plt.plot(cut_values, GEN_eff,  '^-', color='tab:orange', label="GEN Efficiency",  linewidth=2, markersize=6)
+plt.plot(cut_values, RECO_eff, 's-', color='tab:red',   label="RECO Efficiency", linewidth=2, markersize=6)
+plt.plot(cut_values, IVF_eff,  'o--', color='tab:blue', label="IVF Efficiency", linewidth=2, markersize=6)
+
+plt.title("GV Matching Efficiency vs Model Cut", fontsize=14)
+plt.xlabel("Model Cut", fontsize=12)
+plt.ylabel("Efficiency (%)", fontsize=12)
 plt.grid(True, linestyle="--", alpha=0.6)
-plt.legend()
+plt.legend(fontsize=10)
 plt.tight_layout()
-plt.savefig("eff_1track.png")
+plt.savefig("efficiency_vs_cut.png")
+plt.close()
 
-# -------------------------
-# Plot 2: Fake Rate (One common track)
-# -------------------------
-plt.figure(figsize=(7,5))
-plt.plot(x_vals, one_IVF_fake, 'o--', color='blue', label="IVF")
-plt.plot(x_vals, one_RECO_fake, 's-', color='red', label="RECO")
-plt.plot(x_vals, one_GEN_fake, 's-', color='orange', label="GEN")
-plt.xticks(x_vals, thresholds)
-plt.xlabel("Model threshold")
-plt.ylabel("Fake Rate (%)")
-plt.title("Fake Rate vs Threshold (One common track)")
-plt.grid(True, linestyle="--", alpha=0.6)
-plt.legend()
-plt.tight_layout()
-plt.savefig("fake_1track.png")
+# -------------------------------------------------------------
+# PLOT 2: Fake Rate vs Cut
+# -------------------------------------------------------------
+plt.figure(figsize=(8,6))
+plt.plot(cut_values, GEN_fake,  '^-', color='tab:orange', label="GEN Fake Rate",  linewidth=2, markersize=6)
+plt.plot(cut_values, RECO_fake, 's-', color='tab:red',   label="RECO Fake Rate", linewidth=2, markersize=6)
+plt.plot(cut_values, IVF_fake,  'o--', color='tab:blue', label="IVF Fake Rate", linewidth=2, markersize=6)
 
-# -------------------------
-# Plot 3: Efficiency (Two common tracks)
-# -------------------------
-plt.figure(figsize=(7,5))
-plt.plot(x_vals, two_IVF_eff, 'o--', color='blue', label="IVF")
-plt.plot(x_vals, two_RECO_eff, 's-', color='red', label="RECO")
-plt.plot(x_vals, two_GEN_eff, 's-', color='orange', label="GEN")
-plt.xticks(x_vals, thresholds)
-plt.xlabel("Model threshold")
-plt.ylabel("Efficiency (%)")
-plt.title("Efficiency vs Threshold (Two common tracks)")
+plt.title("GV Fake Rate vs Model Cut", fontsize=14)
+plt.xlabel("Model Cut", fontsize=12)
+plt.ylabel("Fake Rate (%)", fontsize=12)
 plt.grid(True, linestyle="--", alpha=0.6)
-plt.legend()
+plt.legend(fontsize=10)
 plt.tight_layout()
-plt.savefig("eff_2track.png")
+plt.savefig("fake_rate_vs_cut.png")
+plt.close()
 
-# -------------------------
-# Plot 4: Fake Rate (Two common tracks)
-# -------------------------
-plt.figure(figsize=(7,5))
-plt.plot(x_vals, two_IVF_fake, 'o--', color='blue', label="IVF")
-plt.plot(x_vals, two_RECO_fake, 's-', color='red', label="RECO")
-plt.plot(x_vals, two_GEN_fake, 's-', color='orange', label="GEN")
-plt.xticks(x_vals, thresholds)
-plt.xlabel("Model threshold")
-plt.ylabel("Fake Rate (%)")
-plt.title("Fake Rate vs Threshold (Two common tracks)")
-plt.grid(True, linestyle="--", alpha=0.6)
-plt.legend()
-plt.tight_layout()
-plt.savefig("fake_2track.png")
+print("\n✅ Plots saved as 'efficiency_vs_cut.png' and 'fake_rate_vs_cut.png'")
 

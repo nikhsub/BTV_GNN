@@ -12,9 +12,10 @@ parser.add_argument("-d", "--data", default="", help="Data file")
 parser.add_argument("-st", "--save_tag", default="", help="Save tag for data")
 parser.add_argument("-s", "--start", default=0, help="Evt # to start from")
 parser.add_argument("-e", "--end", default=4000, help="Evt # to end with")
+parser.add_argument("-ds", "--downsample_fraction", type=float, default=0.1, help="fraction of no hf events to downsample")
 args = parser.parse_args()
 
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt',
+trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt',
                 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 
 # Load data
@@ -23,14 +24,9 @@ with uproot.open(args.data) as f:
     datatree = f['tree']
 
 num_evts = datatree.num_entries
+num_classes = 7
 
 trk_data = {feat: datatree[feat].array() for feat in trk_features}
-sig_ind_array = datatree['sig_ind'].array()
-sig_flag_array = datatree['sig_flag'].array()
-bkg_flag_array = datatree['bkg_flag'].array()
-#bkg_ind_array = datatree['bkg_ind'].array()
-SV_ind_array = datatree['SVtrk_ind'].array()
-had_pt_array = datatree['had_pt'].array()
 trk_1_array  = datatree['trk_1'].array()
 trk_2_array  = datatree['trk_2'].array()
 deltaR_array  = datatree['deltaR'].array()
@@ -44,7 +40,11 @@ dotprod_2_array  = datatree['dotprod_2'].array()
 pair_mom_array  = datatree['pair_mom'].array()
 pair_invmass_array  = datatree['pair_invmass'].array()
 
-def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, val_comb_inds):
+trk_label_array  = datatree["trk_label"].array()     # 0–6
+trk_hadidx_array = datatree["trk_hadidx"].array()    # hadron index
+trk_flav_array   = datatree["trk_flav"].array()      # -1, 1, 2, 3, 4, 5
+
+def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav):
     """
     Create edge index and edge features for tracks in val_comb_inds using DCA-based clustering.
 
@@ -65,8 +65,6 @@ def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvt
     pair_mom_np = pair_mom.to_numpy()
     pair_invmass_np = pair_invmass.to_numpy()
 
-    # Filter based on val_comb_inds (valid track indices)
-    valid_edge_mask = np.isin(trk_1_np, val_comb_inds) & np.isin(trk_2_np, val_comb_inds)
 
     feature_mask = (
         (cptopv_np < 15) &
@@ -80,9 +78,15 @@ def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvt
         (pair_mom_np < 100)
     )
 
+    gen_mask = (
+        (trk_hadidx[trk_1_np] == trk_hadidx[trk_2_np])
+        & (trk_flav[trk_1_np] == trk_flav[trk_2_np])
+        & (trk_hadidx[trk_1_np] >= 0)
+    )
+
 
     # Combine both masks
-    final_mask = valid_edge_mask & feature_mask
+    final_mask = feature_mask | gen_mask
 
     # Extract valid edges and their features
     edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
@@ -90,10 +94,16 @@ def create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvt
                                dca_sig_np[final_mask], cptopv_np[final_mask],
                                 pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
 
-    return edge_index, edge_features
+    edge_labels = (
+        (trk_hadidx[trk_1_np[final_mask]] == trk_hadidx[trk_2_np[final_mask]])
+        & (trk_flav[trk_1_np[final_mask]] == trk_flav[trk_2_np[final_mask]])
+        & (trk_hadidx[trk_1_np[final_mask]] >= 0)
+    ).astype(np.float32)
 
-def create_event_graphs(trk_data, sig_ind_array, sig_flag_array,
-                   SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
+    return edge_index, edge_features, edge_labels
+
+def create_event_graphs(trk_data, trk_label_array, trk_hadidx_array, trk_flav_array,
+                   trk_1_array, trk_2_array, deltaR_array,
                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features, nevts=3):
 
@@ -104,28 +114,35 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array,
     else:
         end = int(args.end)
 
-    dummy_values = np.array([-999.0] * 8 + [-1.0] * 3 + [-3.0], dtype=np.float32)  # Customize per feature
+    dummy_values = np.array([-999.0] * 10 + [-1.0] * 3 + [-3.0], dtype=np.float32)  # Customize per feature
 
     for evt in range(int(args.start), end):
-        print(evt)
+        if(evt%1000==0): print(evt)
 
-        evt_features = {f: trk_data[f][evt] for f in trk_features}
-        fullfeatmat = np.stack([evt_features[f] for f in trk_features], axis=1)
-        fullfeatmat = np.array(fullfeatmat, dtype=np.float32)
-
-
-        # Where values are NaN or inf, replace with dummy
-        mask = ~np.isfinite(fullfeatmat)
-        fullfeatmat[mask] = np.broadcast_to(dummy_values, fullfeatmat.shape)[mask]
-
-        #valid_indices = np.where(nan_mask)[0]
-        #
-        #val_inds_map = {ind: i for i, ind in enumerate(valid_indices)}
-        valid_indices = np.arange(len(fullfeatmat))
-        val_inds_map = {ind: ind for ind in valid_indices}  # Identity map
         
-        evtsiginds = list(set(sig_ind_array[evt]))
+        # --- build the full feature matrix ---
+        evt_features = np.stack([np.asarray(trk_data[f][evt]) for f in trk_features], axis=1).astype(np.float32)
+
+        # --- replace non-finite values with dummy pattern ---
+        mask = ~np.isfinite(evt_features)
+        if mask.any():
+            evt_features[mask] = np.broadcast_to(dummy_values, evt_features.shape)[mask]
+
+        ntrk = len(evt_features)
+        if ntrk == 0:
+            continue
         
+        trk_labels_evt = np.array(trk_label_array[evt], dtype=np.int64)
+        trk_hadidx_evt = np.array(trk_hadidx_array[evt], dtype=np.int64)
+        trk_flav_evt   = np.array(trk_flav_array[evt], dtype=np.int64)
+
+        hf_mask = np.isin(trk_labels_evt, [2, 3, 4]) 
+        num_hf = np.sum(hf_mask)
+        if num_hf < 2:
+            # keep only certain fraction of these events
+            if np.random.rand() > args.downsample_fraction:
+                continue
+
         trk_1 = trk_1_array[evt]
         trk_2 = trk_2_array[evt]
         dca = dca_array[evt]
@@ -138,34 +155,19 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array,
         dotprod_2 = dotprod_2_array[evt]
         pair_mom = pair_mom_array[evt]
         pair_invmass = pair_invmass_array[evt]
-    
-        #evtbkginds = list(set(bkg_ind_array[evt]))
-        #evtbkginds = [ind for ind in evtbkginds if ind not in evtsiginds]
-    
-        evtsiginds = [val_inds_map[ind] for ind in evtsiginds if ind in val_inds_map]
-        if len(evtsiginds) < 2:
-            continue  # Skip this event
-
-        #evtbkginds = [val_inds_map[ind] for ind in evtbkginds if ind in val_inds_map]
         
-        edge_index, edge_features = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, valid_indices)
+        edge_index, edge_features, edge_labels = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
         if edge_index.shape[1] == 0:
             continue
-        
-        edge_index = np.vectorize(val_inds_map.get)(edge_index)
 
-        labels = np.zeros(len(fullfeatmat), dtype=np.float32)
-        labels[evtsiginds] = 1  # Label signal as 1
+        y_onehot = np.eye(num_classes, dtype=np.float32)[trk_labels_evt]
 
-        hadron_weight = 1
-
-        # Create the graph
         evt_graph = Data(
-            x=torch.tensor(fullfeatmat, dtype=torch.float),
-            y=torch.tensor(labels, dtype=torch.float),
-            edge_index=torch.tensor(edge_index, dtype=torch.int64),
+            x=torch.tensor(evt_features, dtype=torch.float),
+            y=torch.tensor(y_onehot, dtype=torch.float),     # node labels
+            edge_index=torch.tensor(edge_index, dtype=torch.long),
             edge_attr=torch.tensor(edge_features, dtype=torch.float),
-            had_weight=torch.tensor([hadron_weight], dtype=torch.float)
+            edge_y=torch.tensor(edge_labels, dtype=torch.float)    # edge labels
         )
 
         evt_graphs.append(evt_graph)
@@ -173,12 +175,12 @@ def create_event_graphs(trk_data, sig_ind_array, sig_flag_array,
     return evt_graphs
 
 print("Creating event training data...")
-event_graphs = create_event_graphs(trk_data, sig_ind_array, sig_flag_array, 
-                                    SV_ind_array, had_pt_array, trk_1_array, trk_2_array, deltaR_array,
-                                    dca_array, dca_sig_array, cptopv_array, pvtoPCA_1_array, pvtoPCA_2_array,
-                                    dotprod_1_array, dotprod_2_array, pair_mom_array, pair_invmass_array, trk_features)
+event_graphs = create_event_graphs(trk_data, trk_label_array, trk_hadidx_array, trk_flav_array, 
+                                    trk_1_array, trk_2_array, 
+                                    deltaR_array, dca_array, dca_sig_array, cptopv_array, 
+                                    pvtoPCA_1_array, pvtoPCA_2_array, dotprod_1_array, dotprod_2_array, 
+                                    pair_mom_array, pair_invmass_array, trk_features)
 
-print(f"Saving event training data to evttrain_{args.save_tag}.pkl...")
-with open(f"evttraindata_{args.save_tag}.pkl", 'wb') as f:
-    pickle.dump(event_graphs, f)
+print(f"Saving event training data to evttrain_{args.save_tag}.pt...")
+torch.save(event_graphs, f"evttraindata_{args.save_tag}.pt")
 

@@ -1,250 +1,261 @@
+#!/usr/bin/env python3
 import warnings
 warnings.filterwarnings("ignore")
 
-
 import argparse
-import uproot
 import numpy as np
 import torch
-import json
-import torch_geometric
-from torch_geometric.data import Data, DataLoader
-from torch.utils.data import random_split
-from torch_geometric.nn import knn_graph
 import pickle
 from tqdm import tqdm
-import os
-import torch.nn.functional as F
-import math
-from GCNModel import *
-import pprint
 import matplotlib.pyplot as plt
-import joblib
-from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
-import xgboost as xgb
+from sklearn.metrics import roc_curve, auc
+from AttnModel import *
 
+HF_CLASSES = {2, 3, 4}  # heavy flavour for IVF comparison
 
-parser = argparse.ArgumentParser("Model comparison")
-parser.add_argument("-f", "--file", required=True, help="Testing data file")
-parser.add_argument("-m1", "--model1", required=True, help="Path to first model (XGBoost or other)")
-parser.add_argument("-m2", "--model2", required=True, help="Path to second model (XGBoost or other)")
-parser.add_argument("-t1", "--tag1", required=True, help="Tag for model 1")
-parser.add_argument("-t2", "--tag2", required=True, help="Tag for model 2")
-parser.add_argument("-st", "--savetag", default="", help="Savetag for pngs")
-parser.add_argument("-had", "--hadron", default=False, action='store_true', help="Testing on hadron samples")
+# ---------------------------------------------------------
+# One-hot → integer labels
+# ---------------------------------------------------------
+def labels_from_onehot(y):
+    return torch.argmax(y, dim=1).cpu().numpy()
 
+# ---------------------------------------------------------
+# Run GNN and get per-node class probabilities
+# ---------------------------------------------------------
+def run_gnn(graphs, model, device):
+    all_probs = []
+    all_labels = []
+
+    for data in graphs:
+        data = data.to(device)
+        with torch.no_grad():
+            out = model(data.x, data.edge_index, data.edge_attr)
+            node_logits = out[0] if isinstance(out, (list, tuple)) else out
+            if node_logits.dim() == 3:
+                node_logits = node_logits.squeeze(0)
+            probs = torch.softmax(node_logits, dim=1).cpu().numpy()
+
+        labels = labels_from_onehot(data.y)
+        all_probs.append(probs)
+        all_labels.append(labels)
+
+    return np.vstack(all_probs), np.hstack(all_labels)
+
+# ---------------------------------------------------------
+# Run XGB and get per-node class probabilities
+# ---------------------------------------------------------
+def run_xgb(graphs, xgb_model):
+    all_probs = []
+    all_labels = []
+
+    for data in graphs:
+        X = data.x.cpu().numpy()
+        probs = xgb_model.predict_proba(X)  # (N,7)
+        labels = labels_from_onehot(data.y)
+
+        all_probs.append(probs)
+        all_labels.append(labels)
+
+    return np.vstack(all_probs), np.hstack(all_labels)
+
+# ---------------------------------------------------------
+# IVF HF-vs-rest ROC point
+# ---------------------------------------------------------
+def evaluate_ivf_hf(graphs):
+    preds = []
+    labels = []
+
+    for data in graphs:
+        n = data.y.shape[0]
+        true_lbls = labels_from_onehot(data.y)
+        y_bin = np.array([1 if c in HF_CLASSES else 0 for c in true_lbls])
+
+        ivf_pred = np.zeros(n, dtype=np.int32)
+        ivf_pred[data.ivf_inds.cpu().numpy()] = 1
+
+        preds.append(ivf_pred)
+        labels.append(y_bin)
+
+    preds = np.hstack(preds)
+    labels = np.hstack(labels)
+
+    # IVF gives fixed prediction → one operating point
+    tp = np.sum((preds == 1) & (labels == 1))
+    fp = np.sum((preds == 1) & (labels == 0))
+    fn = np.sum((preds == 0) & (labels == 1))
+    tn = np.sum((preds == 0) & (labels == 0))
+
+    tpr = tp / (tp + fn) if (tp + fn) else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) else 0.0
+
+    # AUC not super meaningful for a single point, but you can compute it via roc_curve if needed
+    return tpr, fpr
+
+# ---------------------------------------------------------
+# Plot OVR ROC for a single class
+# ---------------------------------------------------------
+def plot_ovr_roc_for_class(
+    cls, gnn_probs, xgb_probs, labels, tag1, tag2,
+    ivf_tpr, ivf_fpr, savetag
+):
+    class_name = label_names[cls]
+
+    # Binary OVR labels
+    y_true = (labels == cls).astype(int)
+
+    if y_true.sum() == 0 or y_true.sum() == len(y_true):
+        print(f"Class {cls} ({class_name}): trivial labels — skipping.")
+        return
+
+    # Scores
+    gnn_scores = gnn_probs[:, cls]
+    xgb_scores = xgb_probs[:, cls]
+
+    # ROC curves
+    fpr_gnn, tpr_gnn, _ = roc_curve(y_true, gnn_scores)
+    auc_gnn = auc(fpr_gnn, tpr_gnn)
+
+    fpr_xgb, tpr_xgb, _ = roc_curve(y_true, xgb_scores)
+    auc_xgb = auc(fpr_xgb, tpr_xgb)
+
+    plt.figure(figsize=(8, 6))
+
+    plt.plot(tpr_gnn, fpr_gnn,
+             label=f"{tag1} (AUC={auc_gnn:.3f})",
+             color='red', linewidth=2)
+
+    plt.plot(tpr_xgb, fpr_xgb,
+             label=f"{tag2} (AUC={auc_xgb:.3f})",
+             color='blue', linewidth=2)
+
+    # IVF only for HF-like classes
+    if cls in {2, 3, 4}:
+        plt.scatter(
+            [ivf_tpr], [ivf_fpr],
+            color='black', marker='x', s=80,
+            label=f"IVF (TPR={ivf_tpr:.2f}, FPR={ivf_fpr:.2e})"
+        )
+
+    plt.xlabel("Signal Efficiency (TPR)")
+    plt.ylabel("Background Mistag (FPR)")
+    plt.yscale("log")
+    plt.grid(True)
+
+    plt.title(f"{class_name} — One-vs-Rest ROC")
+
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"ROC_ovr_{class_name}_{savetag}.png", dpi=300)
+    plt.close()
+
+# ---------------------------------------------------------
+# Plot OVR histograms for a single class (GNN vs XGB)
+# ---------------------------------------------------------
+def plot_ovr_hist_for_class(cls, gnn_probs, xgb_probs, labels, tag1, tag2, savetag):
+    class_name = label_names[cls]
+
+    y_true = (labels == cls).astype(int)
+
+    gnn_scores = gnn_probs[:, cls]
+    xgb_scores = xgb_probs[:, cls]
+
+    gnn_sig = gnn_scores[y_true == 1]
+    gnn_bkg = gnn_scores[y_true == 0]
+
+    xgb_sig = xgb_scores[y_true == 1]
+    xgb_bkg = xgb_scores[y_true == 0]
+
+    fig, axs = plt.subplots(1, 2, figsize=(15, 6), sharey=True)
+    bins = 50
+
+    # --------------------------
+    # GNN
+    # --------------------------
+    axs[0].hist(gnn_sig, bins=bins, alpha=0.75, label="Signal", color='red')
+    axs[0].hist(gnn_bkg, bins=bins, alpha=0.7, label="Background", color='blue')
+
+    axs[0].set_yscale("log")
+    axs[0].set_title(f"GNN ({tag1}) — {class_name} OVR")
+    axs[0].set_xlabel("Score")
+    axs[0].set_ylabel("Tracks")
+    axs[0].grid(True)
+    axs[0].legend()
+
+    # --------------------------
+    # XGB
+    # --------------------------
+    axs[1].hist(xgb_sig, bins=bins, alpha=0.75, label="Signal", color='red')
+    axs[1].hist(xgb_bkg, bins=bins, alpha=0.7, label="Background", color='blue')
+
+    axs[1].set_yscale("log")
+    axs[1].set_title(f"XGB ({tag2}) — {class_name} OVR")
+    axs[1].set_xlabel("Score")
+    axs[1].grid(True)
+    axs[1].legend()
+
+    plt.tight_layout()
+    plt.savefig(f"HIST_ovr_{class_name}_{savetag}.png", dpi=300)
+    plt.close()
+
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
+parser = argparse.ArgumentParser("Model comparison: OVR ROC + histograms")
+parser.add_argument("-f",  "--file",   required=True, help="Test .pt file with graphs")
+parser.add_argument("-m1", "--model1", required=True, help="GNN model path (.pth)")
+parser.add_argument("-m2", "--model2", required=True, help="XGB model path (.pkl)")
+parser.add_argument("-t1", "--tag1",   required=True, help="Name/tag for GNN")
+parser.add_argument("-t2", "--tag2",   required=True, help="Name/tag for XGB")
+parser.add_argument("-st", "--savetag", default="",   help="Suffix for output PNGs")
 args = parser.parse_args()
 
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+print("Loading graphs...")
+graphs = torch.load(args.file)
 
+trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig','trk_ip2dsig', 'trk_ip3dsig',  'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
+label_names = ["Hard", "PU", "B", "BtoC", "C", "Oth", "Fake"]
 
-def evaluate_xgb(graphs, model):
+# --- Load GNN ---
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+gnn = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64, heads=2)
+gnn.load_state_dict(torch.load(args.model1, map_location="cpu"))
+gnn.to(device)
+gnn.eval()
 
-    all_preds, all_labels = [], []
+print("Running GNN inference...")
+gnn_probs, gnn_labels = run_gnn(graphs, gnn, device)
 
-    for data in graphs:
-        preds = model.predict_proba(data.x)[:,1]  # Assuming data.x contains the features
-        preds = np.nan_to_num(preds, nan=0.0)
-    
-        if(not args.hadron):
-            siginds = data.siginds.cpu().numpy()
-            labels = np.zeros(len(preds))
-            labels[siginds] = 1
-        else:
-            labels = data.y.squeeze().cpu().numpy()
-
-        all_preds.extend(preds)
-        all_labels.extend(labels)
-
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
-
-    precision, recall, _ = precision_recall_curve(all_labels, all_preds)
-    pr_auc = average_precision_score(all_labels, all_preds)
-
-    fpr, tpr, _ = roc_curve(all_labels, all_preds)
-    roc_auc = auc(fpr, tpr)
-
-    return precision, recall, pr_auc, fpr, tpr, roc_auc, all_preds, all_labels
-
-def evaluate(graphs, model, device):
-
-    all_preds, all_labels = [], []
-    sv_tp, sv_fp, sv_tn, sv_fn = 0, 0, 0, 0
-
-    for data in graphs:
-        with torch.no_grad():
-            data = data.to(device)
-            _, logits = model(data.x.unsqueeze(0), data.edge_index.unsqueeze(0), data.edge_attr.unsqueeze(0))
-
-            edge_index = data.edge_index.cpu().numpy()
-            edge_attr = data.edge_attr.cpu().numpy()
-
-            #logits_p = logits.squeeze()  # remove batch dim -> shape: [num_nodes, 1]
-            #for idx, logit in enumerate(logits_p):
-            #    print(f"{logit.item():.6f}")
-            
-
-            preds = torch.sigmoid(logits)
-            preds = preds.squeeze().cpu().numpy()
-            #preds = np.nan_to_num(preds, nan=0.0)
-                
-            if(not args.hadron):
-                siginds = data.siginds.cpu().numpy()
-                svinds = data.svinds.cpu().numpy()
-                ntrks = len(preds)
-
-                labels = np.zeros(len(preds))
-                labels[siginds] = 1
-                
-                tp = len(set(siginds) & set(svinds))
-                tn = ntrks - len(set(siginds) | set(svinds))
-                fp = len(set(svinds) - set(siginds))
-                fn = len(set(siginds) - set(svinds))
-
-                sv_tp += tp
-                sv_fp += fp
-                sv_tn += tn
-                sv_fn += fn
-
- 
-            else:
-                labels = data.y.squeeze().cpu().numpy()
-
-            all_preds.extend(preds)
-            all_labels.extend(labels)
-
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
-
-    precision, recall, thresholds = precision_recall_curve(all_labels, all_preds)
-    pr_auc = average_precision_score(all_labels, all_preds)
-
-    target_recall = 0.72
-
-    # Find index where recall is closest to the target
-    idx = np.abs(recall - target_recall).argmin()
-    
-    # Threshold that gives closest recall to target
-    cut_value = thresholds[idx]
-    matched_precision = precision[idx]
-    matched_recall = recall[idx]
-    
-    # Report
-    print(f"Cut value for recall ≈ {target_recall:.2f}: {cut_value:.4f}")
-    print(f"Model precision at that cut: {matched_precision:.4f}")
-    print(f"Actual recall at that cut:   {matched_recall:.4f}")
-
-    fpr, tpr,_ = roc_curve(all_labels, all_preds)
-    roc_auc = auc(fpr, tpr)
-
-
-    sv_tpr = sv_tp / (sv_tp + sv_fn) if (sv_tp + sv_fn) > 0 else 0
-    sv_fpr = sv_fp / (sv_fp + sv_tn) if (sv_fp + sv_tn) > 0 else 0
-    sv_precision = sv_tp / (sv_tp + sv_fp) if (sv_tp + sv_fp) > 0 else 0
-
-    return precision, recall, pr_auc, sv_precision, sv_tpr, fpr, tpr, roc_auc, sv_tpr, sv_fpr, all_preds, all_labels #Recall is the same thing as tpr
-
-#model1 = GNNModel(len(trk_features), 16, heads=8, dropout=0.11)  # Adjust input_dim if needed
-model1 = GNNModel(len(trk_features), 128, edge_dim=len(edge_features))
-model1.load_state_dict(torch.load(args.model1, map_location=torch.device('cpu')))
-model1.eval()
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model1.to(device)
-with torch.no_grad():
-    print("Dummy token during eval:")
-    print(model1.dummy_token.detach().cpu().numpy())
-
-total_params = sum(p.numel() for p in model1.parameters())
-trainable_params = sum(p.numel() for p in model1.parameters() if p.requires_grad)
-
-print(f"Total parameters: {total_params:,}")
-print(f"Trainable parameters: {trainable_params:,}")
-
+# --- Load XGB ---
+print("Loading XGB model...")
 with open(args.model2, "rb") as f:
-    model2 = pickle.load(f)
+    xgb_model = pickle.load(f)
 
-print(f"Loading data from {args.file}...")
-with open(args.file, 'rb') as f:
-    graphs = pickle.load(f)
+print("Running XGB inference...")
+xgb_probs, xgb_labels = run_xgb(graphs, xgb_model)
 
-#graphs = [graphs[0]]
+# Sanity: labels from GNN and XGB should match; we can trust gnn_labels
+labels = gnn_labels
 
-# Evaluate both files
-print("Running GNN inference....")
-p1, r1, auc1, sv_p1, sv_r1, fpr1, tpr1, roc_auc1, sv_tpr1, sv_fpr1, all_preds_GNN, all_labels_GNN = evaluate(graphs, model1, device)
-print("Running xgb inference...")
-p2, r2, auc2, fpr2, tpr2, roc_auc2, all_preds_XGB, all_labels_XGB = evaluate_xgb(graphs, model2)
+# --- IVF HF-vs-rest ROC point (shared across cls 2,3,4 plots) ---
+print("Evaluating IVF HF-vs-rest point...")
+ivf_tpr, ivf_fpr = evaluate_ivf_hf(graphs)
+print(f"IVF HF ROC point: TPR={ivf_tpr:.3f}, FPR={ivf_fpr:.3f}")
 
-# Plot the ROC curves
-plt.figure(figsize=(10, 8))
-plt.plot(r1, p1, label=f"{args.tag1} (AUC = {auc1:.4f})", color="red")
-plt.plot(r2, p2, label=f"{args.tag2} (AUC = {auc2:.4f})", color="blue")
-if(not args.hadron): plt.scatter([sv_r1], [sv_p1], color="black", label=f"IVF Recall={sv_r1:.2f}, Precision={sv_p1:.2f}", zorder=5)
+# --- For each class: OVR ROC + OVR histograms ---
+for cls in range(7):
+    print(f"Processing class {cls}...")
+    plot_ovr_roc_for_class(
+        cls, gnn_probs, xgb_probs, labels,
+        args.tag1, args.tag2,
+        ivf_tpr, ivf_fpr,
+        args.savetag
+    )
+    plot_ovr_hist_for_class(
+        cls, gnn_probs, xgb_probs, labels,
+        args.tag1, args.tag2,
+        args.savetag
+    )
 
-plt.xlabel("Recall(Signal Efficiency)")
-plt.ylabel("Precision")
-plt.title('PR Curve')
-#plt.yscale("log")
-plt.legend()
-plt.grid()
-plt.savefig(f"PR_modcompare_{args.savetag}.png")
-plt.close()
-
-plt.figure(figsize=(10, 8))
-plt.plot(tpr1, fpr1, label=f"{args.tag1} (AUC = {roc_auc1:.4f})", color="red")
-plt.plot(tpr2, fpr2, label=f"{args.tag2} (AUC = {roc_auc2:.4f})", color="blue")
-if(not args.hadron): plt.scatter([sv_tpr1], [sv_fpr1], color="black", label=f"IVF TPR={sv_tpr1:.2f}, FPR={sv_fpr1:.2f}", zorder=5)
-
-plt.xlabel("Signal Efficiency")
-plt.ylabel("Background Mistag")
-plt.title('ROC Curve')
-plt.yscale("log")
-plt.legend()
-plt.grid()
-plt.savefig(f"ROC_modcompare_{args.savetag}_log.png")
-plt.close()
-
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if torch.is_tensor(tensor) else tensor
-
-gnn_preds = to_numpy(all_preds_GNN)
-gnn_labels = to_numpy(all_labels_GNN)
-
-xgb_preds = to_numpy(all_preds_XGB)
-xgb_labels = to_numpy(all_labels_XGB)
-
-# Separate signal and background
-gnn_sig = gnn_preds[gnn_labels == 1]
-gnn_bkg = gnn_preds[gnn_labels == 0]
-xgb_sig = xgb_preds[xgb_labels == 1]
-xgb_bkg = xgb_preds[xgb_labels == 0]
-
-# Plot side-by-side
-fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-
-bins = 50
-
-# GNN subplot
-axs[0].hist(gnn_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
-axs[0].hist(gnn_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
-axs[0].set_yscale('log')
-axs[0].set_title("GNN Prediction Scores")
-axs[0].set_xlabel("Prediction Score")
-axs[0].set_ylabel("# of tracks")
-axs[0].legend()
-axs[0].grid(True)
-
-# XGB subplot
-axs[1].hist(xgb_sig, bins=bins, alpha=0.8, label='Signal', color='red', density=False)
-axs[1].hist(xgb_bkg, bins=bins, alpha=0.5, label='Background', color='blue', density=False)
-axs[1].set_yscale('log')
-axs[1].set_title("XGBoost Prediction Scores")
-axs[1].set_xlabel("Prediction Score")
-axs[1].legend()
-axs[1].grid(True)
-
-plt.tight_layout()
-plt.savefig(f"output_dist_{args.savetag}.png", dpi=300)
+print("\nDone. Generated OVR ROC and OVR histograms for all 7 classes.\n")
 

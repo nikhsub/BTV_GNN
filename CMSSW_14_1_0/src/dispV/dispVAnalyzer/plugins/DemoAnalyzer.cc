@@ -82,8 +82,8 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
     vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
 	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
-	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer"))),
-	genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
+	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
+	//genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
 {
 	edm::Service<TFileService> fs;	
 	//usesResource("TFileService");
@@ -102,153 +102,107 @@ std::unique_ptr<ONNXRuntime> DemoAnalyzer::initializeGlobalCache(const edm::Para
 
 void DemoAnalyzer::globalEndJob(const ONNXRuntime *cache) {}
 
-/*std::optional<std::tuple<float, float, float>> DemoAnalyzer::isAncestor(const reco::Candidate* ancestor, const reco::Candidate* particle)
-//checks if ancestor is an ancestor of particle in the decay chain
-// returns the vertex coordinates (x, y, z) of the direct daughter right after the ancestor
-
-{
-    // Particle is already the ancestor
-    if (ancestor == particle) {
-        // Use NaN values to indicate that this is the ancestor but we are not returning its vertex
-        return std::make_optional(std::make_tuple(std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()));
-    }
-
-    // Otherwise, loop on mothers, if any, and check for the ancestor in the next level up
-    for (size_t i = 0; i < particle->numberOfMothers(); i++) {
-        auto result = isAncestor(ancestor, particle->mother(i));
-        if (result) {
-            // If we found a NaN tuple, it means this particle is the child of the ancestor
-            if (std::isnan(std::get<0>(*result))) {
-                // So, return this particle's vertex since it's the direct descendant
-                return std::make_optional(std::make_tuple(particle->vx(), particle->vy(), particle->vz()));
-            } else {
-                // Otherwise, keep passing up the found vertex coordinates
-                return result;
-            }
-        }
-    }
-
-    // If we did not return yet, then particle and ancestor are not relatives
-    return std::nullopt;  // Return an empty optional if no ancestor found
-}*/
-
-
-
-// Check if ancestor is ancestor of particle and give decay point of ancestor
-std::optional<std::tuple<float, float, float>> DemoAnalyzer::isAncestor(
-    const reco::Candidate* ancestor,
-    const reco::Candidate* particle)
-{
-    const reco::Candidate* current = particle;
-    //const reco::Candidate* child = nullptr;
-
-    while (current != nullptr && current->numberOfMothers() > 0) {
-        const reco::Candidate* mother = current->mother(0);
-        if (mother == ancestor) {
-            // Found the ancestor; return the vertex of the current particle (i.e., the direct daughter)
-            return std::make_optional(std::make_tuple(current->vx(), current->vy(), current->vz()));
-        }
-        //child = current;
-        current = mother;
-    }
-
-    // If we reached here, the ancestor was not found in the chain
-    return std::nullopt;
-}
-
 
 int DemoAnalyzer::checkPDG(int abs_pdg)
-//Returns 1 for B hadrons
-//Returns 2 for D hadrons
-//Return 3 for S hadrons
-//Returns 0 for anything else
+// Returns:
+// 1 B hadron
+// 2 D hadron
+// 3 S hadron
+// 4 Tau
+// 5 anything else
 {
-
-	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
-				        5122,   //lambda_b0
-                        //5112,   //sigma_b-  // too short  
-                        //5212,   //sigma_b0  // too short
-                        //5222,   //sigma_b+  // too short
-                        5132,   //xi_b-
-                        5232,   //xi_b0
-                        5332,   //omega_b-
-                        5142,   //xi_bc0
-                        5242,   //xi_bc+
-                        5342,   //omega_bc0
-                        5512,   //xi_bb-
-                        5532,   //omega_bb-
-                        5542,   //Omega_bbc0
-                        5554,   //Omega_bbb-
-                        };
-
-	std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
-                                4122,   //lambda_c  
-                                //4222,   //sigma_c++     // too short
-                                //4212,   //sigma_c+      // too short
-                                //4112,   //sigma_c0      // too short
-                                4232,   // csi_c+
-                                4132,   // csi'c0
-                                4332,   // omega^0_c
-                                4412,   //xi_cc^+
-                                4422,   //xi_cc^++
-                                4432,   //omega^+_cc
-                                4444,   //omega^++_ccc
-                                };
-    std::vector<int> pdgList_Tau = { 
-                        15
-                        };
-    std::vector<int> pdgList_S = {
-                                     3122,   //lambda
-                                     3222,   //sigma+
-                                     3212,   //sigma0
-                                     3312,   //csi-
-                                     3322,   //csi0
-                                     3334,   //omega-
+    static const std::unordered_set<int> pdgSet_B = {
+        521, 511, 531, 541,        // Bottom mesons
+        5122,                      // Lambda_b0
+        5132, 5232, 5332,          // Xi_b-, Xi_b0, Omega_b-
+        5142, 5242, 5342,          // Xi_bc0, Xi_bc+, Omega_bc0
+        5512, 5532, 5542, 5554     // Xi_bb-, Omega_bb-, Omega_bbc0, Omega_bbb-
     };
-	if(std::find(pdgList_B.begin(), pdgList_B.end(), abs_pdg) != pdgList_B.end()){
-		return 1;
-	}
-	else if(std::find(pdgList_D.begin(), pdgList_D.end(), abs_pdg) != pdgList_D.end()){
-	       	return 2;
-	}
-    else if(std::find(pdgList_S.begin(), pdgList_S.end(), abs_pdg) != pdgList_S.end()){
-	       	return 3;
-    }
-    else if(std::find(pdgList_Tau.begin(), pdgList_Tau.end(), abs_pdg) != pdgList_Tau.end()){
-	       	return 4;
-	}
-	else{
-		return 0;
-	}
+
+    static const std::unordered_set<int> pdgSet_D = {
+        411, 421, 431,             // Charmed mesons
+        4122,                      // Lambda_c
+        4232, 4132, 4332,          // Xi_c+, Xi’c0, Omega_c0
+        4412, 4422, 4432, 4444     // Xi_cc+, Xi_cc++, Omega_cc+, Omega_ccc++
+    };
+
+    static const std::unordered_set<int> pdgSet_S = {
+        3122, 3222, 3212,          // Lambda, Sigma+, Sigma0
+        3312, 3322, 3334           // Xi-, Xi0, Omega-
+    };
+
+    static const std::unordered_set<int> pdgSet_Tau = {15};
+
+    if (pdgSet_B.count(abs_pdg))      return 1;
+    if (pdgSet_D.count(abs_pdg))      return 2;
+    if (pdgSet_S.count(abs_pdg))      return 3;
+    if (pdgSet_Tau.count(abs_pdg))    return 4;
+    return 5;
 }
 
+int DemoAnalyzer::getDaughterLabel(const reco::GenParticle* dau)
+{
+    // Label meaning:
+    // 0 = Primary (hard scatter)
+    // 1 = Pileup
+    // 2 = fromB
+    // 3 = fromBC
+    // 4 = fromC
+    // 5 = OtherSecondary (S, τ, conversions)
 
-//bool DemoAnalyzer::hasDescendantWithId(const reco::Candidate* particle, const std::vector<int>& pdgIds)
-// not used
-//search for any direct descendant from particle and going below and check if any has a pdgId in the vector list
-//{
-//    // Base case: If the particle is null, return false
-//    if (!particle) {
-//        return false;
-//    }
-//
-//    // Loop over all daughters
-//    for (size_t i = 0; i < particle->numberOfDaughters(); i++) {
-//        const reco::Candidate* daughter = particle->daughter(i);
-//        
-//        // Check if the current daughter is in the D hadron list
-//        if (daughter && std::find(pdgIds.begin(), pdgIds.end(), daughter->pdgId()) != pdgIds.end()) {
-//            return true; // Found a D hadron anywhere in the decay chain
-//        }
-//
-//        // Recursively check deeper in the decay chain
-//        if (hasDescendantWithId(daughter, pdgIds)) {
-//            return true;
-//        }
-//    }
-//
-//    return false; // No D hadron found in the decay chain
-//}
+    static const std::unordered_set<int> pdgSet_B = {
+        521, 511, 531, 541, 5122, 5132, 5232, 5332,
+        5142, 5242, 5342, 5512, 5532, 5542, 5554
+    };
+    static const std::unordered_set<int> pdgSet_C = {
+        411, 421, 431, 4122, 4232, 4132, 4332,
+        4412, 4422, 4432, 4444
+    };
+    static const std::unordered_set<int> pdgSet_S = {
+        3122, 3222, 3212, 3312, 3322, 3334
+    };
+    static const std::unordered_set<int> pdgSet_Tau = {15};
+
+    // --- 1. Collision ID: cleanest PU separation ---
+    if (dau->collisionId() > 0)
+        return 1; // pileup (non-primary collision)
+
+    // --- 2. Initialize ancestry flags ---
+    bool foundB   = false;
+    bool foundC   = false;
+
+    // --- 3. Traverse ancestry chain ---
+    const reco::Candidate* mom = dau->mother(0);
+    int guard = 0;
+    while (mom && guard++ < 100) {
+        const int apdg = std::abs(mom->pdgId());
+
+        if (pdgSet_B.count(apdg))   foundB   = true;
+        if (pdgSet_C.count(apdg))   foundC   = true;
+
+        // stop once we've reached a B hadron (no need to go higher)
+        if (foundB) break;
+
+        mom = mom->mother(0);
+    }
+
+    // --- 4. Heavy-flavor classification ---
+    if (foundB && foundC) return 3; // fromBC
+    if (foundB)           return 2; // fromB
+    if (foundC)           return 4; // fromC
+
+    // --- 5. Other displaced / secondary sources ---
+    const reco::Candidate* mother = dau->mother(0);
+    if (mother) {
+        int mabs = std::abs(mother->pdgId());
+        if (pdgSet_S.count(mabs) || pdgSet_Tau.count(mabs) || mabs == 22)
+            return 5;  // strange hadron, τ, or photon conversion
+    }
+
+    // --- 6. Otherwise: primary hard scatter ---
+    return 0;
+}
+
 
 
 bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
@@ -542,13 +496,13 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   lumi_ = iEvent.luminosityBlock();
   evt_ = iEvent.id().event();
 
-  std::unordered_set<int> genmatched_indices;
-	
-  auto key = std::make_tuple(run_, lumi_, evt_);
-  auto it = sigMatchMap_.find(key);
-  if (it != sigMatchMap_.end()) {
-	genmatched_indices.insert(it->second.begin(), it->second.end());
-  }
+  //std::unordered_set<int> genmatched_indices;
+  //      
+  //auto key = std::make_tuple(run_, lumi_, evt_);
+  //auto it = sigMatchMap_.find(key);
+  //if (it != sigMatchMap_.end()) {
+  //      genmatched_indices.insert(it->second.begin(), it->second.end());
+  //}
 
   nPU = 0;
     //vectors defined in .h
@@ -570,8 +524,9 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   nDaughters.clear();
   nDaughters_B.clear();
   nDaughters_D.clear();
-  Daughters_flag.clear();
+  Daughters_hadidx.clear();
   Daughters_flav.clear();
+  Daughters_label.clear();
   Daughters_pt.clear();
   //Daughters_pdg.clear();
   Daughters_eta.clear();
@@ -741,33 +696,29 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<Measurement1D> ip3d_vals(num_tracks);
 
    for (size_t i = 0; i< num_tracks; ++i) {
-	t_trks[i] = (*theB).build(alltracks[i]);
-	if (!(t_trks[i].isValid())) continue;
-	ip2d_vals[i] = IPTools::signedTransverseImpactParameter(t_trks[i], direction, pv).second;
-	ip3d_vals[i] = IPTools::signedImpactParameter3D(t_trks[i], direction, pv).second;	
+        t_trks[i] = (*theB).build(alltracks[i]);
+        if (!(t_trks[i].isValid())) continue;
+        ip2d_vals[i] = IPTools::signedTransverseImpactParameter(t_trks[i], direction, pv).second;
+        ip3d_vals[i] = IPTools::signedImpactParameter3D(t_trks[i], direction, pv).second;
 
+	double ip_z = t_trks[i].track().dz(pv.position());
+        double ip_z_sig = ip_z / t_trks[i].track().dzError();
 
-
-    //auto ipZPair = IPTools::absoluteImpactParameterZ(t_trks[i], pv);
-    double ip_z = t_trks[i].track().dz(pv.position());
-    double ip_z_sig = ip_z / t_trks[i].track().dzError();
-
-
-    trk_ipz.push_back(ip_z);
-    trk_ipzsig.push_back(ip_z_sig);
-   	trk_ip2d.push_back(ip2d_vals[i].value());
-	trk_ip3d.push_back(ip3d_vals[i].value());
-	trk_ip2dsig.push_back(ip2d_vals[i].significance());
-	trk_ip3dsig.push_back(ip3d_vals[i].significance());
-	trk_p.push_back(alltracks[i].p());
-	trk_pt.push_back(alltracks[i].pt());
-	trk_eta.push_back(alltracks[i].eta());
-	trk_phi.push_back(alltracks[i].phi());
-	trk_charge.push_back(alltracks[i].charge());
-	trk_nValid.push_back(alltracks[i].numberOfValidHits());
-	trk_nValidPixel.push_back(alltracks[i].hitPattern().numberOfValidPixelHits());
-	trk_nValidStrip.push_back(alltracks[i].hitPattern().numberOfValidStripHits());
-	ntrk++;
+        trk_ipz.push_back(ip_z);
+        trk_ipzsig.push_back(ip_z_sig);
+        trk_ip2d.push_back(std::abs(ip2d_vals[i].value()));
+        trk_ip3d.push_back(std::abs(ip3d_vals[i].value()));
+        trk_ip2dsig.push_back(std::abs(ip2d_vals[i].significance()));
+        trk_ip3dsig.push_back(std::abs(ip3d_vals[i].significance()));
+        trk_p.push_back(alltracks[i].p());
+        trk_pt.push_back(alltracks[i].pt());
+        trk_eta.push_back(alltracks[i].eta());
+        trk_phi.push_back(alltracks[i].phi());
+        trk_charge.push_back(alltracks[i].charge());
+        trk_nValid.push_back(alltracks[i].numberOfValidHits());
+        trk_nValidPixel.push_back(alltracks[i].hitPattern().numberOfValidPixelHits());
+        trk_nValidStrip.push_back(alltracks[i].hitPattern().numberOfValidStripHits());
+        ntrk++;
     }
     
     size_t estimated_pairs = num_tracks * num_tracks / 2;  // Approximate number of pairs
@@ -1065,11 +1016,10 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
     // IVF default clustering
 
-   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
+   std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
    
    //MODEL based cluster filtering
 
-   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
    // clusterizer->clusters(pv, t_trks_SV);
 
    //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
@@ -1124,35 +1074,35 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    
    //GENMATCHED based clustering
    
-   std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
-    clusterizer->clusters(pv, t_trks_SV);
+   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
+   // clusterizer->clusters(pv, t_trks_SV);
 
-   std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
-   //
-   // helper lambda: match track index by (pt, eta, phi) within tolerance
-   auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
-     const auto& ref = trk.track();
-     for (size_t i = 0; i < t_trks_SV.size(); ++i) {
-       const auto& cand = t_trks_SV[i].track();
-       if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
-           std::abs(cand.eta() - ref.eta()) < 1e-5 &&
-           std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
-         return static_cast<int>(i);
-       }
-     }
-     return -1;  // not found
-   };
+   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
+   ////
+   //// helper lambda: match track index by (pt, eta, phi) within tolerance
+   //auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
+   //  const auto& ref = trk.track();
+   //  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
+   //    const auto& cand = t_trks_SV[i].track();
+   //    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
+   //        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
+   //        std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
+   //      return static_cast<int>(i);
+   //    }
+   //  }
+   //  return -1;  // not found
+   //};
 
-   //Keep based on seed track
-   for (auto& cl : clustersAll) {
-     int k = matchIndex(cl.seedingTrack);
-     if (k >= 0) {
-         size_t origIdx = t_trks_SV_indices[k];
-         if (genmatched_indices.count(origIdx)) {
-             clusters.push_back(std::move(cl));
-         }
-     }
-   }
+   ////Keep based on seed track
+   //for (auto& cl : clustersAll) {
+   //  int k = matchIndex(cl.seedingTrack);
+   //  if (k >= 0) {
+   //      size_t origIdx = t_trks_SV_indices[k];
+   //      if (genmatched_indices.count(origIdx)) {
+   //          clusters.push_back(std::move(cl));
+   //      }
+   //  }
+   //}
 
    //Keep based on number of tracks that are present in genmatched indices
    //int nRequiredGenMatchedTracks = 1;  // <-- configurable
@@ -1176,12 +1126,6 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    //        clusters.push_back(std::move(cl));
    //    }
    //}
-
-
-
-   
-
-
 
    std::vector<TransientVertex> recoVertices;
    VertexDistanceXY vertTool2D;
@@ -1296,222 +1240,142 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    int ngv_b = 0;
    int ngv_s = 0;
    int ngv_d = 0;
-   int nd = 0;
-   int nd_b = 0;
-   int nd_d = 0;
    std::vector<float> temp_Daughters_pt;
    //std::vector<float> temp_Daughters_pdg;
    std::vector<float> temp_Daughters_eta;
    std::vector<float> temp_Daughters_phi;
    std::vector<int> temp_Daughters_charge;
-   std::vector<int> temp_Daughters_flag;
+   std::vector<int> temp_Daughters_hadidx;
    std::vector<int> temp_Daughters_flav;
-   
+   std::vector<int> temp_Daughters_label;
 
-   	std::vector<int> pdgList_B = { 521, 511, 531, 541, //Bottom mesons
-				        5122,   //lambda_b0
-                        //5112,   //sigma_b-  // too short  
-                        //5212,   //sigma_b0  // too short
-                        //5222,   //sigma_b+  // too short
-                        5132,   //xi_b-
-                        5232,   //xi_b0
-                        5332,   //omega_b-
-                        5142,   //xi_bc0
-                        5242,   //xi_bc+
-                        5342,   //omega_bc0
-                        5512,   //xi_bb-
-                        5532,   //omega_bb-
-                        5542,   //Omega_bbc0
-                        5554,   //Omega_bbb-
-                        };
-    std::vector<int> pdgList_Tau = { 
-                        15
-                        };
-
-	std::vector<int> pdgList_D = {411, 421, 431,      // Charmed mesons
-                                4122,   //lambda_c  
-                                //4222,   //sigma_c++     // too short
-                                //4212,   //sigma_c+      // too short
-                                //4112,   //sigma_c0      // too short
-                                4232,   // csi_c+
-                                4132,   // csi'c0
-                                4332,   // omega^0_c
-                                4412,   //xi_cc^+
-                                4422,   //xi_cc^++
-                                4432,   //omega^+_cc
-                                4444,   //omega^++_ccc
-                                };
-    std::vector<int> pdgList_S = {
-                                     3122,   //lambda
-                                     3222,   //sigma+
-                                     3212,   //sigma0
-                                     3312,   //csi-
-                                     3322,   //csi0
-                                     3334,   //omega-
+   static const std::unordered_set<int> pdgSet_B = {
+        521, 511, 531, 541,        // Bottom mesons
+        5122,                      // Lambda_b0
+        5132, 5232, 5332,          // Xi_b-, Xi_b0, Omega_b-
+        5142, 5242, 5342,          // Xi_bc0, Xi_bc+, Omega_bc0
+        5512, 5532, 5542, 5554     // Xi_bb-, Omega_bb-, Omega_bbc0, Omega_bbb-
     };
 
-   std::unordered_set<int> pdgSet_D(pdgList_D.begin(), pdgList_D.end());
-   std::unordered_set<int> pdgSet_B(pdgList_B.begin(), pdgList_B.end());
-   std::unordered_set<int> pdgSet_S(pdgList_S.begin(), pdgList_S.end());
-   std::unordered_set<int> pdgSet_Tau(pdgList_Tau.begin(), pdgList_Tau.end());
+    static const std::unordered_set<int> pdgSet_D = {
+        411, 421, 431,             // Charmed mesons
+        4122,                      // Lambda_c
+        4232, 4132, 4332,          // Xi_c+, Xi’c0, Omega_c0
+        4412, 4422, 4432, 4444     // Xi_cc+, Xi_cc++, Omega_cc+, Omega_ccc++
+    };
 
+    static const std::unordered_set<int> pdgSet_S = {
+        3122, 3222, 3212,          // Lambda, Sigma+, Sigma0
+        3312, 3322, 3334           // Xi-, Xi0, Omega-
+    };
 
-   
-   for(size_t i=0; i< merged->size();i++)
-   {  //prune loop
-   // looping over Hadrons as mothers [i]
-    //temp_Daughters_pdg.clear();
-	temp_Daughters_pt.clear();
-    temp_Daughters_eta.clear();
-    temp_Daughters_phi.clear();
-    temp_Daughters_charge.clear();
-    temp_Daughters_flag.clear();
-    temp_Daughters_flav.clear();
+    static const std::unordered_set<int> pdgSet_Tau = {15};
 
-	const reco::Candidate* prun_part = &(*merged)[i];
-	if(!(prun_part->pt() > 10 && std::abs(prun_part->eta()) < 2.5)) continue;
-    // pt and eta requirement are satisfied for the mother
-    // pdg of the meson candidate and the mother
-	int hadPDG = checkPDG(std::abs(prun_part->pdgId()));
+   for (size_t i = 0; i < merged->size(); ++i) 
+   {//Prune loop
+       temp_Daughters_pt.clear();
+       temp_Daughters_eta.clear();
+       temp_Daughters_phi.clear();
+       temp_Daughters_charge.clear();
+       temp_Daughters_hadidx.clear();
+       temp_Daughters_label.clear();
+       temp_Daughters_flav.clear();
 
-	//int had_parPDG = checkPDG(std::abs(prun_part->mother(0)->pdgId())); GC not used
-    
-	//if (hadPDG == 1) { // B hadron
-    //        int n_charged_nonD_daughters = 0;
-	//    for (size_t i = 0; i < prun_part->numberOfDaughters(); ++i) {
-    //    	const Candidate* dau = prun_part->daughter(i);
-	//	if (!dau) continue; // Safety check
-    //            int dau_pdg = std::abs(dau->pdgId());
-    //            // pdgSet_D.count(dau_pdg)  returns 1 if dau_pdg in the set, 0 otherwise
-    //            if (dau->charge() != 0 && pdgSet_D.count(dau_pdg) == 0) {
-    //                n_charged_nonD_daughters++;
-    //            }
-    //        }
-    //    
-    //        if (n_charged_nonD_daughters < 2) {
-    //            continue; // Skip B hadron — GV will be better captured by D hadron
-    //        }
-    //    }
+       const reco::Candidate* hadron = &(*merged)[i];
+       if (!(hadron->pt() > 10.0 && std::abs(hadron->eta()) < 2.5)) continue;
 
+       int hadPDG = checkPDG(std::abs(hadron->pdgId())); // 1=B, 2=D, 3=S, 4=tau, 5=other
 
+       int nStableCharged = 0;
+       float vx = 0;
+       float vy = 0;
+       float vz = 0;
 
-    // check if n_stable_charged_daughters >=2
-    if (hadPDG >= 1) {  // B or D hadron (or S)
-        int n_stable_charged_daughters = 0;
+       // Keep track if  stored GV for this hadron
+       bool addedGV = false;
 
+       // ----------------------------------------
+       // Loop over all potential daughters
+       // ----------------------------------------
+       for (size_t k = 0; k < merged->size(); ++k) {
+           const reco::GenParticle* dau = &(*merged)[k];
+           if (dau->status() != 1) continue;
+           if (dau->charge() == 0) continue;
+           if (dau->pt() < 0.8) continue;
+           if (std::abs(dau->eta()) > 2.5) continue;
 
-        for (size_t k = 0; k < merged->size(); ++k){
+           // Trace ancestry to see if 'hadron' is an ancestor
+           bool isDescendant = false;
+           const reco::Candidate* mom = dau->mother(0);
+           while (mom) {
+               if (mom == hadron) { isDescendant = true; break; }
 
-        // k is looping over the genParticles to look for daugh
-            const reco::Candidate* current = &(*merged)[k];
-            // Apply kinematic + status cuts first
-            if (current->status() != 1) continue;
-            if (current->charge() == 0) continue;
-            if (current->pt() < 0.8) continue;
-            if (std::abs(current->eta()) > 2.5) continue;
+               int mPDG = std::abs(mom->pdgId());
+               if (pdgSet_B.count(mPDG) || pdgSet_D.count(mPDG) ||
+                   pdgSet_S.count(mPDG) || pdgSet_Tau.count(mPDG))
+                   break;
+               mom = mom->mother(0);
+           }
+           if (!isDescendant) continue;
 
-            bool isDescendant = false;
+           // --- Classify and store daughter ---
+           int label = getDaughterLabel(dau);
+           nStableCharged++;
 
-            while (current->mother(0)) {
-                const reco::Candidate* mother = current->mother(0);
+           temp_Daughters_pt.push_back(dau->pt());
+           temp_Daughters_eta.push_back(dau->eta());
+           temp_Daughters_phi.push_back(dau->phi());
+           temp_Daughters_charge.push_back(dau->charge());
+           temp_Daughters_hadidx.push_back(ngv);     // group ID for hadron
+           temp_Daughters_flav.push_back(hadPDG);  // hadron flavor (5 if light)
+           temp_Daughters_label.push_back(label);  // classification label (0–5)
 
-                // If we reach prun_part, it's a descendant
-                if (mother == prun_part) {
-                    isDescendant = true;
-                    break;
-                }
+           // Use daughter vertex as approximate GV
+           vx = dau->vx();
+           vy = dau->vy();
+           vz = dau->vz();
+       }
 
-                // If an intermediate mother is a B or D hadron, stop (displaced decay)
-                int mother_pdg = std::abs(mother->pdgId());
-                if (pdgSet_B.count(mother_pdg) || pdgSet_D.count(mother_pdg) || pdgSet_S.count(mother_pdg) || pdgSet_Tau.count(mother_pdg)) break;
+       // Require atleast 2 stable charged daughters
+       if (nStableCharged < 2) continue;
 
-                current = mother;
-            }
+       // -----------------------------------------
+       // Store GV + hadron info once
+       // -----------------------------------------
+       if (!addedGV) {
+           nhads++;
+           ngv++; // increment hadron group ID
+           addedGV = true;
 
-            if (isDescendant) {
-                n_stable_charged_daughters++;
-                if (n_stable_charged_daughters >= 2) break;
-            }
-        }
+           if (hadPDG == 1) ngv_b++;
+           if (hadPDG == 2) ngv_d++;
+           if (hadPDG == 3) ngv_s++;
+           if (hadPDG == 4) ngv_tau++;
 
-    // Not enough valid stable charged daughters → skip this hadron
-    if (n_stable_charged_daughters < 2) continue;
-    }
+           Hadron_pt.push_back(hadron->pt());
+           Hadron_eta.push_back(hadron->eta());
+           Hadron_phi.push_back(hadron->phi());
+           Hadron_GVx.push_back(vx);
+           Hadron_GVy.push_back(vy);
+           Hadron_GVz.push_back(vz);
+           GV_flag.push_back(nhads - 1);
+       }
 
-	// From here on, only hadrons with 2 stable charged daughters, pt>0.8, eta acceptance, stable, from the same GV
-	if(hadPDG > 0)
-	{ //if pdg
-		nhads++;
-		Hadron_pt.push_back(prun_part->pt());
-		Hadron_eta.push_back(prun_part->eta());
-		Hadron_phi.push_back(prun_part->phi());
-		bool addedGV = false;
-		int nPack = 0;
-		float vx = std::numeric_limits<float>::quiet_NaN();
-        float vy = std::numeric_limits<float>::quiet_NaN();
-        float vz = std::numeric_limits<float>::quiet_NaN();
+       // Append daughters (only after GV stored)
+       Daughters_pt.insert(Daughters_pt.end(), temp_Daughters_pt.begin(), temp_Daughters_pt.end());
+       Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
+       Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
+       Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
+       Daughters_hadidx.insert(Daughters_hadidx.end(), temp_Daughters_hadidx.begin(), temp_Daughters_hadidx.end());
+       Daughters_flav.insert(Daughters_flav.end(), temp_Daughters_flav.begin(), temp_Daughters_flav.end());
+       Daughters_label.insert(Daughters_label.end(), temp_Daughters_label.begin(), temp_Daughters_label.end());
 
-		for(size_t j=0; j< merged->size(); j++){
-			const Candidate *pack =  &(*merged)[j];
-			if(pack==prun_part) continue;
-			if(!(pack->status()==1 && pack->pt() > 0.8 && std::abs(pack->eta()) < 2.5 && std::abs(pack->charge()) > 0)) continue;
-			//const Candidate * mother = pack->mother(0);
-			const Candidate * dau_candidate = pack;
-                if(dau_candidate != nullptr){
-                    auto GV = isAncestor(prun_part, dau_candidate);  
-                    if(GV.has_value()){
-                        std::tie(vx, vy, vz) = *GV;
-                        if (!std::isnan(vx) && !std::isnan(vy) && !std::isnan(vz)){
-                            nPack++;
-                            temp_Daughters_pt.push_back(pack->pt());
-                            //temp_Daughters_pdg.push_back(pack->pdgId());
-                            temp_Daughters_eta.push_back(pack->eta());
-                            temp_Daughters_phi.push_back(pack->phi());
-                            temp_Daughters_charge.push_back(pack->charge());
-                            temp_Daughters_flag.push_back(ngv); //Hadron index
-                            temp_Daughters_flav.push_back(hadPDG); //Hadron flav
-                
-                        }
-                
-                    }
-        
-                }
-			
-		}
-	   
-		if(nPack >=2){
-			if(!addedGV){
-				ngv++;
-				if(hadPDG==1) ngv_b++;
-               			if(hadPDG==2) ngv_d++;
-		                if(hadPDG==3) ngv_s++;
-                		if(hadPDG==4) ngv_tau++;
-			        Hadron_GVx.push_back(vx);
-                    		Hadron_GVy.push_back(vy); 
-                    		Hadron_GVz.push_back(vz); 
-                    		GV_flag.push_back(nhads-1); //Which hadron it belongs to
-				addedGV = true;
-			}
-			Daughters_pt.insert(Daughters_pt.end(), temp_Daughters_pt.begin(), temp_Daughters_pt.end());
-            //Daughters_pdg.insert(Daughters_pdg.end(), temp_Daughters_pdg.begin(), temp_Daughters_pdg.end());
-            		Daughters_eta.insert(Daughters_eta.end(), temp_Daughters_eta.begin(), temp_Daughters_eta.end());
-            		Daughters_phi.insert(Daughters_phi.end(), temp_Daughters_phi.begin(), temp_Daughters_phi.end());
-            		Daughters_charge.insert(Daughters_charge.end(), temp_Daughters_charge.begin(), temp_Daughters_charge.end());
-            		Daughters_flag.insert(Daughters_flag.end(), temp_Daughters_flag.begin(), temp_Daughters_flag.end());
-			Daughters_flav.insert(Daughters_flav.end(), temp_Daughters_flav.begin(), temp_Daughters_flav.end());
-			nd = nPack;
-			if(hadPDG==1) nd_b = nd;
-			if(hadPDG==2) nd_d = nd;
+       nDaughters.push_back(nStableCharged);
+       nDaughters_B.push_back(hadPDG == 1 ? nStableCharged : 0);
+       nDaughters_D.push_back(hadPDG == 2 ? nStableCharged : 0);
+    } //prune loop
 
-			nDaughters.push_back(nd);
-   			nDaughters_B.push_back(nd_b);
-   			nDaughters_D.push_back(nd_d);
-
-   		}
-	} //if pdg
-
-   } //prune loop
-
+  
    nHadrons.push_back(nhads);
    nGV.push_back(ngv);
    nGV_B.push_back(ngv_b);
@@ -1594,7 +1458,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     auto result = matchHadronsToSV(
                                         distances,
                                         SVtrk_pt, SVtrk_eta, SVtrk_phi, SVtrk_SVIdx,
-                                        Daughters_pt, Daughters_eta, Daughters_phi, Daughters_flag,
+                                        Daughters_pt, Daughters_eta, Daughters_phi, Daughters_hadidx,
                                         Hadron_GVx.size()
                                         );
     Hadron_SVIdx = result.first;
@@ -1610,7 +1474,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
     auto result_reco = matchHadronsToSV(
                                         distances_reco,
                                         SVrecoTrk_pt, SVrecoTrk_eta, SVrecoTrk_phi, SVrecoTrk_SVrecoIdx,
-                                        Daughters_pt, Daughters_eta, Daughters_phi, Daughters_flag,
+                                        Daughters_pt, Daughters_eta, Daughters_phi, Daughters_hadidx,
                                         Hadron_GVx.size()
                                         );
     Hadron_SVRecoIdx = result_reco.first;
@@ -1640,8 +1504,8 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("nPU", &nPU);
 	tree->Branch("nHadrons", &nHadrons);                // Hadrons of GenVertices             
 	tree->Branch("Hadron_pt", &Hadron_pt);              // Hadrons of GenVertices
-    tree->Branch("Hadron_SVIdx", &Hadron_SVIdx);              // Hadrons of GenVertices
-    tree->Branch("Hadron_SVDistance", &Hadron_SVDistance);
+    	tree->Branch("Hadron_SVIdx", &Hadron_SVIdx);              // Hadrons of GenVertices
+    	tree->Branch("Hadron_SVDistance", &Hadron_SVDistance);
 	tree->Branch("Hadron_eta", &Hadron_eta);            // Hadrons of GenVertices 
 	tree->Branch("Hadron_phi", &Hadron_phi);            // Hadrons of GenVertices 
 	tree->Branch("Hadron_GVx", &Hadron_GVx);            // Hadrons of GenVertices 
@@ -1649,17 +1513,17 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("Hadron_GVz", &Hadron_GVz);            // Hadrons of GenVertices 
 	tree->Branch("nGV", &nGV);
 	tree->Branch("nGV_B", &nGV_B);
-    tree->Branch("nGV_Tau", &nGV_Tau);
-    tree->Branch("nGV_S", &nGV_S);
+    	tree->Branch("nGV_Tau", &nGV_Tau);
+    	tree->Branch("nGV_S", &nGV_S);
 	tree->Branch("nGV_D", &nGV_D);
 	tree->Branch("GV_flag", &GV_flag);                  // GV_genHadronIdx 
 	tree->Branch("nDaughters", &nDaughters);
 	tree->Branch("nDaughters_B", &nDaughters_B);
 	tree->Branch("nDaughters_D", &nDaughters_D);
-	tree->Branch("Daughters_flag", &Daughters_flag);
-    tree->Branch("Daughters_flav", &Daughters_flav);        // flavor of the mother of the vertex
+	tree->Branch("Daughters_hadidx", &Daughters_hadidx);
+    	tree->Branch("Daughters_flav", &Daughters_flav);        // flavor of the mother of the vertex
+	tree->Branch("Daughters_label", &Daughters_label);
 	tree->Branch("Daughters_pt", &Daughters_pt);        // from 0.8 on
-    //tree->Branch("Daughters_pdg", &Daughters_pdg);
 	tree->Branch("Daughters_eta", &Daughters_eta);
 	tree->Branch("Daughters_phi", &Daughters_phi);      // ok
 	tree->Branch("Daughters_charge", &Daughters_charge); // ok +-1
@@ -1667,10 +1531,10 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("nTrks", &ntrks);                      // all the tracks in the event
 	tree->Branch("trk_ip2d", &trk_ip2d);
 	tree->Branch("trk_ip3d", &trk_ip3d);
-    tree->Branch("trk_ipz", &trk_ipz);
-    tree->Branch("trk_ipzsig", &trk_ipzsig);
+    	tree->Branch("trk_dz", &trk_ipz);
+    	tree->Branch("trk_dzsig", &trk_ipzsig);
 	tree->Branch("trk_ip2dsig", &trk_ip2dsig);
-    tree->Branch("trk_ip3dsig", &trk_ip3dsig);
+    	tree->Branch("trk_ip3dsig", &trk_ip3dsig);
 	tree->Branch("trk_p", &trk_p);
 	tree->Branch("trk_pt", &trk_pt);
 	tree->Branch("trk_eta", &trk_eta);
@@ -1680,12 +1544,12 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
 	tree->Branch("trk_nValidStrip", &trk_nValidStrip);
 	tree->Branch("trk_charge", &trk_charge);
          
-    tree->Branch("trk_i", &trk_i);                  // needed for edge features
+    	tree->Branch("trk_i", &trk_i);                  // needed for edge features
 	tree->Branch("trk_j", &trk_j);                  // needed for edge features
 	tree->Branch("deltaR", &deltaR);                
 	tree->Branch("dca", &dca);
 	tree->Branch("dca_sig", &dca_sig);
-    tree->Branch("cptopv", &cptopv);
+    	tree->Branch("cptopv", &cptopv);
 	tree->Branch("pvtoPCA_i", &pvtoPCA_i);
 	tree->Branch("pvtoPCA_j", &pvtoPCA_j);
 	tree->Branch("dotprod_i", &dotprod_i);
@@ -1734,55 +1598,55 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("SV_reco_nTracks", &SV_reco_nTracks);
     tree->Branch("SV_chi2_reco", &SV_chi2_reco);
 
-    std::ifstream file(genmatch_csv_);
-	if (!file.is_open()) {
-              std::cerr << "Failed to open file: " << genmatch_csv_ << std::endl;
-              return;
-         }
-
-	std::string line;
-	std::getline(file, line);  // Skip header
-	
-	int line_no = 1;
-	while (std::getline(file, line)) {
-	    ++line_no;
-	    if (line.empty()) continue;
-	
-	    std::stringstream ss(line);
-	    std::string run_str, lumi_str, evt_str, sig_str;
-	
-	    // Parse CSV fields (note: will fail if sig_str contains a comma inside quotes)
-	    if (!std::getline(ss, run_str, ',')) continue;
-	    if (!std::getline(ss, lumi_str, ',')) continue;
-	    if (!std::getline(ss, evt_str, ',')) continue;
-	    if (!std::getline(ss, sig_str)) continue;
-	
-	    // Strip potential quotes
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '"'), sig_str.end());
-	
-	    // Strip brackets
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '['), sig_str.end());
-	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), ']'), sig_str.end());
-	
-	    try {
-	        unsigned int run = std::stoul(run_str);
-	        unsigned int lumi = std::stoul(lumi_str);
-	        unsigned int evt = std::stoul(evt_str);
-	
-	        std::vector<int> indices;
-	        std::stringstream sig_ss(sig_str);
-	        std::string val;
-	        while (std::getline(sig_ss, val, ',')) {
-	            if (!val.empty())
-	                indices.push_back(std::stoi(val));
-	        }
-	
-	        sigMatchMap_[{run, lumi, evt}] = indices;
-	
-	    } catch (const std::exception& e) {
-	        std::cerr << "Failed to parse line " << line_no << ": " << e.what() << "\nLine: " << line << std::endl;
-	    }
-	}
+//    std::ifstream file(genmatch_csv_);
+//	if (!file.is_open()) {
+//              std::cerr << "Failed to open file: " << genmatch_csv_ << std::endl;
+//              return;
+//         }
+//
+//	std::string line;
+//	std::getline(file, line);  // Skip header
+//	
+//	int line_no = 1;
+//	while (std::getline(file, line)) {
+//	    ++line_no;
+//	    if (line.empty()) continue;
+//	
+//	    std::stringstream ss(line);
+//	    std::string run_str, lumi_str, evt_str, sig_str;
+//	
+//	    // Parse CSV fields (note: will fail if sig_str contains a comma inside quotes)
+//	    if (!std::getline(ss, run_str, ',')) continue;
+//	    if (!std::getline(ss, lumi_str, ',')) continue;
+//	    if (!std::getline(ss, evt_str, ',')) continue;
+//	    if (!std::getline(ss, sig_str)) continue;
+//	
+//	    // Strip potential quotes
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '"'), sig_str.end());
+//	
+//	    // Strip brackets
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), '['), sig_str.end());
+//	    sig_str.erase(std::remove(sig_str.begin(), sig_str.end(), ']'), sig_str.end());
+//	
+//	    try {
+//	        unsigned int run = std::stoul(run_str);
+//	        unsigned int lumi = std::stoul(lumi_str);
+//	        unsigned int evt = std::stoul(evt_str);
+//	
+//	        std::vector<int> indices;
+//	        std::stringstream sig_ss(sig_str);
+//	        std::string val;
+//	        while (std::getline(sig_ss, val, ',')) {
+//	            if (!val.empty())
+//	                indices.push_back(std::stoi(val));
+//	        }
+//	
+//	        sigMatchMap_[{run, lumi, evt}] = indices;
+//	
+//	    } catch (const std::exception& e) {
+//	        std::cerr << "Failed to parse line " << line_no << ": " << e.what() << "\nLine: " << line << std::endl;
+//	    }
+//	}
    	
 }
 
