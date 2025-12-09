@@ -5,7 +5,7 @@
 
 SRC_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
 DEST_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/excess"
-NUM="93"
+NUM="20"
 
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""

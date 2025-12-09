@@ -18,7 +18,8 @@ import os
 import subprocess
 import torch.nn.functional as F
 import math
-from AttnModel import *
+#from AttnModel import *
+from GCNModel import *
 import joblib
 from sklearn.metrics import roc_auc_score
 from torch.optim.lr_scheduler import StepLR
@@ -32,12 +33,18 @@ parser.add_argument("-mt", "--modeltag", default="test", help="Tag to add to sav
 parser.add_argument("-le", "--load_evt", default="", help="Absolute path to event level validation file")
 
 args = parser.parse_args()
-glob_test_thres = 0.5
 
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig','trk_ip2dsig', 'trk_ip3dsig',  'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 2100
+batchsize = 1000
+
+def count_node_classes(graphs):
+    counts = np.zeros(7, dtype=np.int64)
+    for g in graphs:
+        y = g.y.cpu().numpy()          # [N,7] one-hot
+        counts += y.sum(axis=0).astype(np.int64)
+    print("Class counts:", counts, "total:", counts.sum())
 
 def compute_ce_node_weight(graphs, device):
     """
@@ -78,7 +85,7 @@ def compute_edge_pos_weight(graphs, device):
 
 
 EOS_PREFIX = "root://cmseos.fnal.gov/"
-EOS_DIR = "/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311"
+EOS_DIR = "/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/test"
 local_cache = "/uscms/home/nvenkata/nobackup/BTV/IVF/tmp_pt"
 os.makedirs(local_cache, exist_ok=True)
 train_hads = []
@@ -128,12 +135,14 @@ if args.load_evt != "":
 
 # device, model, optimizer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#count_node_classes(train_hads)
 pos_w_node = compute_ce_node_weight(train_hads, device)
 pos_w_edge = compute_edge_pos_weight(train_hads, device)
 print(f"Node pos weight: {pos_w_node}")
 print(f"Edge pos weight: {pos_w_edge.item():.2f}")
-model = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64, heads=2).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+#model = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64).to(device)
+model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
 
 def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     """Focal loss to emphasize hard-to-classify samples"""
@@ -418,12 +427,32 @@ patience = 8
 no_improve = 0
 val_every = 10
 
+best_epoch_init = {
+                "epoch": None,
+                "train_tot_loss": None,
+                "train_node_loss": None,
+                "train_edge_loss": None,
+                "test_node_loss": None,
+                "test_edge_loss": None, 
+                "val_node_loss": None,
+                "val_edge_loss": None,
+                "test_edge_auc": None,
+                "val_edge_auc": None,
+                "best_metric": None,
+            }
+
+for c in CLASS_NAMES:
+    best_epoch_init[f"test_auc_{CLASS_NAMES[c]}"] = None,
+    best_epoch_init[f"val_auc_{CLASS_NAMES[c]}"] = None
+
 stats = {
     "epochs": [],
-    "best_epoch": {}
+    "best_epoch": best_epoch_init
 }
 
 for epoch in range(int(args.epochs)):
+    
+    print("EPOCH: ", epoch)
 
     # -------------------------
     # Train
@@ -466,6 +495,13 @@ for epoch in range(int(args.epochs)):
     # -------------------------
     # Validation
     # -------------------------
+
+    val_node_auc = [-1]*len(CLASS_NAMES)
+    val_edge_auc = -1
+    val_node_loss = -1
+    val_edge_loss = -1
+    val_metric = -1
+
     if (epoch + 1) % val_every == 0:
         print(f"\nValidating at epoch {epoch}...")
 
@@ -493,9 +529,7 @@ for epoch in range(int(args.epochs)):
         # --------------------------------------------
         important_classes = [2, 3, 4]
 
-        val_metric = (
-            sum(val_node_auc[c] for c in important_classes) + val_edge_auc
-        ) / (len(important_classes) + 1)
+        val_metric = (sum(val_node_auc[c] for c in important_classes) / len(important_classes) + val_edge_auc)/2
 
         print(f"[Val] Combined Metric: {val_metric:.4f}")
 
@@ -517,7 +551,7 @@ for epoch in range(int(args.epochs)):
                 "val_edge_loss": val_edge_loss,
                 "test_edge_auc": test_edge_auc,
                 "val_edge_auc": val_edge_auc,
-                "best_metric": val_metric,
+                "metric": val_metric,
             }
 
             # Add node AUCs for each class to best stats
@@ -551,13 +585,17 @@ for epoch in range(int(args.epochs)):
         "train_edge_loss": train_edge_loss,
         "test_node_loss": test_node_loss,
         "test_edge_loss": test_edge_loss,
+        "val_node_loss": val_node_loss,
+        "val_edge_loss": val_edge_loss,
         "test_edge_auc": test_edge_auc,
-        "metric": best_metric
+        "val_edge_auc": val_edge_auc,
+        "metric": val_metric,
     }
 
     # Add AUCs for each class to epoch stats
     for c in CLASS_NAMES:
         epoch_stats[f"test_auc_{CLASS_NAMES[c]}"] = test_node_auc[c]
+        epoch_stats[f"val_auc_{CLASS_NAMES[c]}"] = val_node_auc[c]
 
     stats["epochs"].append(epoch_stats)
 
@@ -570,7 +608,3 @@ for epoch in range(int(args.epochs)):
         ckpt = os.path.join("model_files", f"model_{args.modeltag}_e{epoch}.pth")
         torch.save(model.state_dict(), ckpt)
         print(f"Checkpoint saved → {ckpt}")
-
-
-    
-
