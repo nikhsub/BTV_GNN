@@ -15,8 +15,10 @@ parser = argparse.ArgumentParser("Model comparison")
 parser.add_argument("-f", "--file", required=True, help="Testing data file")
 args = parser.parse_args()
 
-with open(args.file, "rb") as f:
-    evt_data_list = pickle.load(f)  # could be list or dict of Data objects
+#with open(args.file, "rb") as f:
+#    evt_data_list = pickle.load(f)  # could be list or dict of Data objects
+
+evt_data_list = torch.load(args.file)
 
 # 📊 Organize edge features by connection type
 edge_feature_data = {

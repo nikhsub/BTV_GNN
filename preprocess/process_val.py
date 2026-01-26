@@ -100,7 +100,7 @@ def create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1,
 
     return edge_index, edge_features, edge_labels
 
-def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav, cptopv_thres=50):
+def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav, cptopv_thres=100):
 
     trk_1_np = trk_1.to_numpy()
     trk_2_np = trk_2.to_numpy()
@@ -125,6 +125,47 @@ def create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1
 
     # Extract valid edges and their features
     edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
+    edge_features = np.vstack([dca_np[final_mask], deltaR_np[final_mask],
+                               dca_sig_np[final_mask], cptopv_np[final_mask],
+                                pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
+
+    edge_labels = (
+        (trk_hadidx[trk_1_np[final_mask]] == trk_hadidx[trk_2_np[final_mask]])
+        & (trk_flav[trk_1_np[final_mask]] == trk_flav[trk_2_np[final_mask]])
+        & (trk_hadidx[trk_1_np[final_mask]] >= 0)
+    ).astype(np.float32)
+
+    return edge_index, edge_features, edge_labels
+
+def create_edge_index_full(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx, trk_flav):
+    """
+    Create edge index and edge features for fully connected graph
+
+    """
+
+    # Convert to numpy for fast indexing
+    trk_1_np = trk_1.to_numpy()
+    trk_2_np = trk_2.to_numpy()
+    dca_np = dca.to_numpy()
+    deltaR_np = deltaR.to_numpy()
+    dca_sig_np = dca_sig.to_numpy()
+    cptopv_np = cptopv.to_numpy()
+    pvtoPCA_1_np = pvtoPCA_1.to_numpy()
+    pvtoPCA_2_np = pvtoPCA_2.to_numpy()
+    dotprod_1_np = dotprod_1.to_numpy()
+    dotprod_2_np = dotprod_2.to_numpy()
+    pair_mom_np = pair_mom.to_numpy()
+    pair_invmass_np = pair_invmass.to_numpy()
+
+    print("TRK 1 NP LEN", len(trk_1_np))
+
+
+    # Combine both masks
+    final_mask = np.ones_like(trk_1_np, dtype=bool)
+
+    # Extract valid edges and their features
+    edge_index = np.vstack([trk_1_np[final_mask], trk_2_np[final_mask]]).astype(np.int64)
+
     edge_features = np.vstack([dca_np[final_mask], deltaR_np[final_mask],
                                dca_sig_np[final_mask], cptopv_np[final_mask],
                                 pvtoPCA_1_np[final_mask], pvtoPCA_2_np[final_mask], dotprod_1_np[final_mask], dotprod_2_np[final_mask], pair_mom_np[final_mask], pair_invmass_np[final_mask]]).T
@@ -193,9 +234,10 @@ def create_dataobj(trk_data, SV_ind_array, trk_label_array, trk_hadidx_array, tr
 
     
         if not(args.test):
-            edge_index, edge_features, edge_labels = create_edge_index_val(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
+            edge_index, edge_features, edge_labels = create_edge_index_full(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
         else:
-            edge_index, edge_features, edge_labels = create_edge_index_test(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt, cptopv_thres=100)
+            print("Test dataset")
+            edge_index, edge_features, edge_labels = create_edge_index_full(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
     
         if edge_index.shape[1] == 0:
             continue
@@ -216,7 +258,7 @@ def create_dataobj(trk_data, SV_ind_array, trk_label_array, trk_hadidx_array, tr
         print("edgefeat", edge_features.shape)
         print("y", trk_labels_evt.shape) 
         print("edgey", edge_labels.shape)
-        print("ivfinds", ivfinds)
+        #print("ivfinds", ivfinds)
         print("Contains NaNs:", np.isnan(edge_features).any())
         evt_objects.append(evt_graph)
 

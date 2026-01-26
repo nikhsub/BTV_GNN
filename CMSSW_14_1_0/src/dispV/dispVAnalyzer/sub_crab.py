@@ -33,8 +33,9 @@ config.JobType.pluginName = 'Analysis'
 
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
-config.Data.totalUnits = 50
-config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/ttbarhad_50files_'+str(timestamp)
+config.Data.totalUnits = 70
+
+config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/ttbarhad_70files_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -42,7 +43,7 @@ config.Site.storageSite = 'T3_US_FNALLPC'
 
 from multiprocessing import Process
 #config.Site.whitelist = ['T3_US_Colorado', 'T2_US_Florida', 'T3_CH_PSI', 'T2_DE_RWTH', 'T2_CH_CERN', 'T2_US_*', 'T2_IT_Pisa','T2_UK_London_IC','T2_HU_Budapest', 'T2_IT_Rome', 'T2_IT_Bari', 'T2_IT_Legnaro', 'T2_FR_CCIN2P3', 'T2_FR_GRIF_LLR', 'T2_DE_DESY', 'T2_DE_RWTH', 'T2_UK_London_Brunel', 'T2_ES_CIEMAT', 'T2_ES_IFCA', 'T2_BE_IIHE']
-config.Site.whitelist = ['T2_*']
+config.Site.whitelist = ['T1_*', 'T2_*', 'T3_*']
 
 #def produce_new_cfg(mass, life, lines):
 #    file = open("XXTo4J/XXTo4J_M"+str(mass)+"_CTau"+str(life)+"mm_CP2_GENSIM.py", "w")
@@ -79,13 +80,13 @@ def sub_crab_job():
         return
     
     # Filter files from 100 to 200 (zero-indexed)
-    file_list = files.split('\n')[0:50]
+    file_list = files.split('\n')[0:70]
     if not file_list:
-        print("No files found in the specified range (0–50).")
+        print("No files found in the specified range (0–70).")
         return
 
     # Save the filtered file list to a local text file (optional)
-    with open("filelist_0_50.txt", "w") as f:
+    with open("filelist_0_70.txt", "w") as f:
         for file in file_list:
             f.write(file + '\n')
 

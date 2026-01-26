@@ -23,18 +23,18 @@ process.load('RecoTracker.Configuration.RecoTracker_cff')
 #process.load('Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff')
 process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3000))
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(100))
 
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
           seedMax3DIPValue =  cms.double(9999.0),
-          seedMin3DIPSignificance = cms.double(1.2),    # 1.2 sigma    
-          seedMin3DIPValue = cms.double(0.005),         # 50um /0.005
+          seedMin3DIPSignificance = cms.double(0.0),    # 1.2 sigma    
+          seedMin3DIPValue = cms.double(0.00),         # 50um /0.005
           
           clusterMaxDistance = cms.double(0.05),
           clusterMaxSignificance = cms.double(4.5),
           distanceRatio = cms.double(20.0),
-          clusterMinAngleCosine = cms.double(0.5),
+          clusterMinAngleCosine = cms.double(0.0),
           maxTimeSignificance = cms.double(99999), #3.5 from Nik
 )
 
@@ -57,6 +57,7 @@ process.mergedGenParticles = cms.EDProducer("MergedGenParticleProducer",
 
 
 process.demo = cms.EDAnalyzer('DemoAnalyzer',
+    training = cms.untracked.bool(False),
     packed = cms.InputTag("packedGenParticles"),
     pruned = cms.InputTag("prunedGenParticles"),
     beamspot = cms.untracked.InputTag('offlineBeamSpot'), # GC
@@ -72,15 +73,15 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     vertexfitter = cms.untracked.PSet(
              finder = cms.string('avr')
          ),
-    #TrackPredCut = cms.untracked.double(0.0),
-    TrackPredCut = cms.untracked.double(options.trackCut),
+    TrackPredCut = cms.untracked.double(0.0),
+    #TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out128_newmod_2010.onnx")
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/fullconn_out64_2601.onnx")
     #genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0210.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        #fileName = cms.string("ttbarhad_3k_genmatch_0210.root"),
-        fileName = cms.string(options.outfile),
+        fileName = cms.string("output_ttbarhad.root"),
+        #fileName = cms.string(options.outfile),
 )
 
 process.p = cms.Path(process.mergedGenParticles + process.demo)

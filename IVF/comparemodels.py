@@ -9,7 +9,7 @@ import pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
-from AttnModel import *
+from GCNModel import *
 
 HF_CLASSES = {2, 3, 4}  # heavy flavour for IVF comparison
 
@@ -492,7 +492,8 @@ label_names = ["Hard", "PU", "B", "BtoC", "C", "Oth", "Fake"]
 
 # --- Load GNN ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-gnn = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64)
+#gnn = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64)
+gnn = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features))
 gnn.load_state_dict(torch.load(args.model1, map_location="cpu"))
 gnn.to(device)
 gnn.eval()

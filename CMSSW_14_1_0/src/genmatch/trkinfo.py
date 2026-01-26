@@ -162,8 +162,8 @@ for i, evt in enumerate(tree):
 
     trk_ip2d.assign(np.abs(np.array(evt.trk_ip2d)).tolist())
     trk_ip3d.assign(np.abs(np.array(evt.trk_ip3d)).tolist())
-    trk_dz.assign(list(evt.trk_ipz))
-    trk_dzsig.assign(list(evt.trk_ipzsig))
+    trk_dz.assign(list(evt.trk_dz))
+    trk_dzsig.assign(list(evt.trk_dzsig))
     trk_ip2dsig.assign(np.abs(np.array(evt.trk_ip2dsig)).tolist())
     trk_ip3dsig.assign(np.abs(np.array(evt.trk_ip3dsig)).tolist())
     trk_p.assign(list(evt.trk_p))

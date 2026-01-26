@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# Usage:
-# ./move_eos_files.sh <SRC_DIR> <DEST_DIR> <NUM_FILES>
-
-SRC_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
-DEST_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/excess"
-NUM="20"
+#SRC_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/test"
+#DEST_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
+SRC_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/"
+DEST_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/excess"
+NUM="677"
 
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""
 
 # Get a list of ROOT files in the source directory
 files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.pt$" | head -n "$NUM")
+#files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.root$" | head -n "$NUM")
 
 #echo $files
 

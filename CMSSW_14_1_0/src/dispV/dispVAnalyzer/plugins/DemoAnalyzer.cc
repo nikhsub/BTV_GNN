@@ -67,6 +67,7 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
     //esConsumes -> token to EventSetup module
     //consumes -> token to Event data module
 	theTTBToken(esConsumes(edm::ESInputTag("", "TransientTrackBuilder"))),
+	training_ (iConfig.getUntrackedParameter<bool>("training")),
 	TrackCollT_ (consumes<pat::PackedCandidateCollection>(iConfig.getUntrackedParameter<edm::InputTag>("tracks"))),
 	PVCollT_ (consumes<reco::VertexCollection>(iConfig.getUntrackedParameter<edm::InputTag>("primaryVertices"))),
 	SVCollT_ (consumes<edm::View<reco::VertexCompositePtrCandidate>>(iConfig.getUntrackedParameter<edm::InputTag>("secVertices"))),
@@ -79,7 +80,7 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
 	TrackPtCut_(iConfig.getUntrackedParameter<double>("TrackPtCut")),
 	TrackPredCut_(iConfig.getUntrackedParameter<double>("TrackPredCut")),
 	vtxconfig_(iConfig.getUntrackedParameter<edm::ParameterSet>("vertexfitter")),
-    vtxmaker_(vtxconfig_),
+    	vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
 	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
 	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
@@ -749,7 +750,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             float phi2 = alltracks[j].phi();
             float delta_r_val = reco::deltaR(eta1, phi1, eta2, phi2);
     
-            if (delta_r_val > 0.4) continue;
+            if (delta_r_val > 1) continue;
 	
 	    const float PION_MASS = 0.13957018; // GeV (charged pion mass)
         
@@ -773,9 +774,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             float sum_e  = e1 + e2;
             
             float inv_mass = sqrt(sum_e*sum_e - (sum_px*sum_px + sum_py*sum_py + sum_pz*sum_pz));
+
+	    if(inv_mass > 20.0) continue;
     
             float dca_val = -1.0;  // Default invalid value
-	        float cptopv_val = -1.0;
+	    float cptopv_val = -1.0;
             float pvToPCAseed_val = -1.0;
             float pvToPCAtrack_val = -1.0;
             float dotprodTrack_val = -999.0;
@@ -788,15 +791,15 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
             	VertexDistance3D distanceComputer;
             	auto m = distanceComputer.distance(
-            	    VertexState(minDist.points().second, t_trks[i].impactPointState().cartesianError().position()),
-            	    VertexState(minDist.points().first, t_trks[j].impactPointState().cartesianError().position()));
+            	VertexState(minDist.points().second, t_trks[i].impactPointState().cartesianError().position()),
+            	VertexState(minDist.points().first, t_trks[j].impactPointState().cartesianError().position()));
             	dca_val = m.value();
 	    	if(m.error() > 0){
 	    	    dcaSig_val = m.value() / m.error();
 	    	}
 	
 	    	GlobalPoint cp(minDist.crossingPoint());
-            GlobalPoint pvp(pv.x(), pv.y(), pv.z());
+                GlobalPoint pvp(pv.x(), pv.y(), pv.z());
    	    	 
 	    	GlobalPoint seedPCA = minDist.points().second;  // PCA of track i (seed)
 	    	GlobalPoint trackPCA = minDist.points().first;  // PCA of track j
@@ -814,7 +817,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             	pairMomentumMag = pairMomentum.mag();
 	     }
 
-	     if (dca_val > 0.2) continue;	
+	     if (dca_val > 1 or dcaSig_val > 100 or cptopv_val > 20 or pvToPCAseed_val > 20 or pvToPCAtrack_val > 20) continue;	
+	     if (pairMomentumMag < 0.05 or pairMomentumMag > 100) continue;
     
             #pragma omp critical
             {
@@ -836,402 +840,505 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    ntrks.push_back(ntrk);
 
-   std::vector<std::vector<float>> track_features;
-   std::vector<std::vector<float>> edge_features;
-   std::vector<int64_t> edge_i, edge_j;
+  
+   if(!training_)
+   {
+   	std::vector<std::vector<float>> track_features;
+   	std::vector<std::vector<float>> edge_features;
+   	std::vector<int64_t> edge_i, edge_j;
 
-   // Step 1: Build track_features, and track bad ones
-   for (size_t i = 0; i < static_cast<size_t>(ntrk); ++i) {
-       std::vector<float> features = {
-           trk_eta[i],
-           trk_phi[i],
-           trk_ip2d[i],
-           trk_ip3d[i],
-           trk_ip2dsig[i],
-           trk_ip3dsig[i],
-           trk_p[i],
-           trk_pt[i],
-           static_cast<float>(trk_nValid[i]),
-           static_cast<float>(trk_nValidPixel[i]),
-           static_cast<float>(trk_nValidStrip[i]),
-           static_cast<float>(trk_charge[i])
-       };
-   
-       bool has_nan = false;
-       for (float val : features) {
-           if (!std::isfinite(val)) {
-               has_nan = true;
-               break;
-           }
-       }
-   
-       if (has_nan) {
-	   features = {
-            -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f,  // 8 dummy float features
-            -1.0f, -1.0f, -1.0f,  // 3 dummy int features as float
-            -3.0f          // charge dummy
-           };
-       }
-   
-       track_features.push_back(features);
-   }
+   	// Step 1: Build track_features, and track bad ones
+   	for (size_t i = 0; i < static_cast<size_t>(ntrk); ++i) {
+   	    std::vector<float> features = {
+   	        trk_eta[i],
+   	        trk_phi[i],
+   	        trk_ip2d[i],
+   	        trk_ip3d[i],
+   	        trk_ipz[i],
+   	        trk_ipzsig[i],
+   	        trk_ip2dsig[i],
+   	        trk_ip3dsig[i],
+   	        trk_p[i],
+   	        trk_pt[i],
+   	        static_cast<float>(trk_nValid[i]),
+   	        static_cast<float>(trk_nValidPixel[i]),
+   	        static_cast<float>(trk_nValidStrip[i]),
+   	        static_cast<float>(trk_charge[i])
+   	    };
+   	
+   	    bool has_nan = false;
+   	    for (float val : features) {
+   	        if (!std::isfinite(val)) {
+   	            has_nan = true;
+   	            break;
+   	        }
+   	    }
+   	
+   	    if (has_nan) {
+   	        features = {
+   	         -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f,  // 10 dummy float features
+   	         -1.0f, -1.0f, -1.0f,  // 3 dummy int features as float
+   	         -3.0f          // charge dummy
+   	        };
+   	    }
+   	
+   	    track_features.push_back(features);
+   	}
 
-    
-   
-   for (size_t idx = 0; idx < trk_i.size(); ++idx) {
-       int i = trk_i[idx];
-       int j = trk_j[idx];
+   	 
+   	
+   	for (size_t idx = 0; idx < trk_i.size(); ++idx) {
+   	    int i = trk_i[idx];
+   	    int j = trk_j[idx];
 
-       if (cptopv[idx] >= 100.0 || pair_mom[idx] >= 100.0) continue;
+   	    if (cptopv[idx] >= 100.0 || pair_mom[idx] >= 100.0) continue;
 
-       edge_i.push_back(i);
-       edge_j.push_back(j);
-       
-        edge_features.push_back({
-        dca[idx],
-        deltaR[idx],
-        dca_sig[idx],
-        cptopv[idx],
-        pvtoPCA_i[idx],
-        pvtoPCA_j[idx],
-        dotprod_i[idx],
-        dotprod_j[idx],
-        pair_mom[idx],
-        pair_invmass[idx]
-        }); 
-    }
+   	    edge_i.push_back(i);
+   	    edge_j.push_back(j);
+   	    
+   	     edge_features.push_back({
+   	     dca[idx],
+   	     deltaR[idx],
+   	     dca_sig[idx],
+   	     cptopv[idx],
+   	     pvtoPCA_i[idx],
+   	     pvtoPCA_j[idx],
+   	     dotprod_i[idx],
+   	     dotprod_j[idx],
+   	     pair_mom[idx],
+   	     pair_invmass[idx]
+   	     }); 
+   	 }
 
-   std::vector<float> x_in_flat;
-   x_in_flat.reserve(track_features.size() * 12);
-   for (const auto& feat : track_features)
-       x_in_flat.insert(x_in_flat.end(), feat.begin(), feat.end());
+   	std::vector<float> x_in_flat;
+   	x_in_flat.reserve(track_features.size() * 14);
+   	for (const auto& feat : track_features)
+   	    x_in_flat.insert(x_in_flat.end(), feat.begin(), feat.end());
 
-   std::vector<float> edge_index_flat_f;
-   edge_index_flat_f.reserve(edge_i.size() * 2);
-   for (size_t k = 0; k < edge_i.size(); ++k) {
-       edge_index_flat_f.push_back(static_cast<float>(edge_i[k]));
-   }
+   	std::vector<float> edge_index_flat_f;
+   	edge_index_flat_f.reserve(edge_i.size() * 2);
+   	for (size_t k = 0; k < edge_i.size(); ++k) {
+   	    edge_index_flat_f.push_back(static_cast<float>(edge_i[k]));
+   	}
 
-   for (size_t k = 0; k < edge_j.size(); ++k) {
-       edge_index_flat_f.push_back(static_cast<float>(edge_j[k]));
-   }
+   	for (size_t k = 0; k < edge_j.size(); ++k) {
+   	    edge_index_flat_f.push_back(static_cast<float>(edge_j[k]));
+   	}
 
-   std::vector<float> edge_attr_flat;
-   edge_attr_flat.reserve(edge_features.size() * 10);
-   for (const auto& feat : edge_features)
-       edge_attr_flat.insert(edge_attr_flat.end(), feat.begin(), feat.end());
+   	std::vector<float> edge_attr_flat;
+   	edge_attr_flat.reserve(edge_features.size() * 10);
+   	for (const auto& feat : edge_features)
+   	    edge_attr_flat.insert(edge_attr_flat.end(), feat.begin(), feat.end());
 
-    //std::cout << "track_features.size(): " << track_features.size() << "\n";
-    //std::cout << "x_in_flat.size(): " << x_in_flat.size() << "\n";
-    //std::cout << "edge_index_flat_f.size(): " << edge_index_flat_f.size() << "\n";
-    //std::cout << "edge_attr_flat.size(): " << edge_attr_flat.size() << "\n";
-    //std::cout << "edge_i.size(): " << edge_i.size() << "\n";
-    //std::cout << "edge_features.size(): " << edge_features.size() << "\n";
-
-
-      
-   // === 4. Set input names and feed data ===
-   std::vector<std::string> input_names_ = {"x_in", "edge_index", "edge_attr"};
-
-   std::vector<std::vector<int64_t>> input_shapes_ = {
-    {1, static_cast<int64_t>(track_features.size()), 12},        // x_in
-    {1, 2, static_cast<int64_t>(edge_i.size())},                // edge_index
-    {1, static_cast<int64_t>(edge_features.size()), 10}         // edge_attr
-   };
-      
-   std::vector<std::vector<float>> data_ = {
-    x_in_flat,
-    edge_index_flat_f,
-    edge_attr_flat
-   };
+   	 //std::cout << "track_features.size(): " << track_features.size() << "\n";
+   	 //std::cout << "x_in_flat.size(): " << x_in_flat.size() << "\n";
+   	 //std::cout << "edge_index_flat_f.size(): " << edge_index_flat_f.size() << "\n";
+   	 //std::cout << "edge_attr_flat.size(): " << edge_attr_flat.size() << "\n";
+   	 //std::cout << "edge_i.size(): " << edge_i.size() << "\n";
+   	 //std::cout << "edge_features.size(): " << edge_features.size() << "\n";
 
 
-   std::vector<std::vector<float>> output = globalCache()->run(input_names_, data_, input_shapes_);
-   
+   	   
+   	// === 4. Set input names and feed data ===
+   	std::vector<std::string> input_names_ = {"x_in", "edge_index", "edge_attr"};
 
-   // Get logits from output[1]
-   std::vector<float> logits_data = output[1];  // output[1] is "node_probs"
-
-   std::vector<std::pair<float, size_t>> score_index_pairs;
-   for (size_t i = 0; i < logits_data.size(); ++i) {
-       if (std::isnan(logits_data[i])) {
-           std::cerr << "Warning: NaN in logit at index " << i;
-       }
-       float raw_score = sigmoid(logits_data[i]);
-       if (std::isnan(raw_score)) {
-           std::cerr << "Warning: NaN in sigmoid at index " << i << ", setting to 0.0\n";
-       }
-       preds.push_back(raw_score);
-       score_index_pairs.emplace_back(raw_score, i);  // (score, index)
-   }
-   
-   float score_threshold = TrackPredCut_; // Tuned based on ROC curve
+   	std::vector<std::vector<int64_t>> input_shapes_ = {
+   	 {1, static_cast<int64_t>(track_features.size()), 14},        // x_in
+   	 {1, 2, static_cast<int64_t>(edge_i.size())},                // edge_index
+   	 {1, static_cast<int64_t>(edge_features.size()), 10}         // edge_attr
+   	};
+   	   
+   	std::vector<std::vector<float>> data_ = {
+   	 x_in_flat,
+   	 edge_index_flat_f,
+   	 edge_attr_flat
+   	};
 
 
+   	std::vector<std::vector<float>> output = globalCache()->run(input_names_, data_, input_shapes_);
 
-//Build IVF - like
-   std::unordered_set<size_t> selected_indices;
-   for (size_t i = 0; i < preds.size(); ++i) {
-        const reco::Track& trk = alltracks[i];
+   	const std::vector<float>& node_logits_flat = output[0];
+   	const std::vector<float>& edge_logits_flat = output[1];
+   	const std::vector<float>& node_probs_flat  = output[2]; // [N*7]
+   	const std::vector<float>& edge_probs_flat  = output[3]; // [E]
 
-        double dz = trk.dz(pv.position());
-       if (
-                (alltracks[i].pt() > 0.8) && 
-                (std::abs(alltracks[i].eta())<2.5)
-                 && (std::abs(dz) < 0.3)
-        )
-            {
-            selected_indices.insert(i);
-
-            }
-   }
-
-   std::cout << "selected_indices..size(): " << selected_indices.size() << "\n";
-   std::cout << "alltracks.size(): " << alltracks.size() << "\n";
-   
-   
-
-   //IVF is running on tracks passing threshold on GNN score
-   std::unordered_set<size_t> expanded_indices = selected_indices;  // will include nearby tracks too
+	preds = edge_probs_flat;
 
 
-      //IVF is running on genMatch tracks
-   //std::unordered_set<size_t> expanded_indices(matched_indices.begin(), matched_indices.end());
-
-   //std::cout << "matched_indices..size(): " << matched_indices.size() << "\n";
-   //
-   std::vector<reco::TransientTrack> t_trks_SV;
-   std::vector<size_t> t_trks_SV_indices;
-
-   // Step 3: Fill t_trks_SV with the full expanded set
-   t_trks_SV.clear();  // if not already empty
-   t_trks_SV_indices.clear();
-
-   for (size_t idx : expanded_indices) {
-       t_trks_SV.push_back(t_trks[idx]);
-       t_trks_SV_indices.push_back(idx);
-   }
-   
-   
-
-    // IVF default clustering
-
-   std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
-   
-   //MODEL based cluster filtering
-
-   // clusterizer->clusters(pv, t_trks_SV);
-
-   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
-   ////
-   //// helper lambda: match track index by (pt, eta, phi) within tolerance
-   //auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
-   //  const auto& ref = trk.track();
-   //  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
-   //    const auto& cand = t_trks_SV[i].track();
-   //    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
-   //        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
-   //        std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
-   //      return static_cast<int>(i);
-   //    }
-   //  }
-   //  return -1;  // not found
-   //};
-   ////Keep based on seed track
-   //for (auto& cl : clustersAll) {
-   //   int k = matchIndex(cl.seedingTrack);  // index into t_trks_SV
-   //   if (k >= 0) {
-   //     size_t origIdx = t_trks_SV_indices[k];  // map back to original index
-   //     if (preds[origIdx] > score_threshold) {
-   //       clusters.push_back(std::move(cl));    // keep only ML-seeded clusters
-   //     }
-   //   }
-   //}
-   //
-   ////Keep based on number of tracks passing model cut
-   //int nRequiredPassingTracks = 2;  // <-- control this as you like
-
-   //for (auto& cl : clustersAll) {
-   //    int nPass = 0;
-   //
-   //    // loop over all tracks in the cluster
-   //    for (const auto& trk : cl.tracks) {
-   //        int k = matchIndex(trk);
-   //        if (k >= 0) {
-   //            size_t origIdx = t_trks_SV_indices[k];
-   //            if (preds[origIdx] > score_threshold) {
-   //                ++nPass;
-   //                if (nPass >= nRequiredPassingTracks) break; // stop once threshold is met
-   //            }
-   //        }
-   //    }
-   //
-   //    if (nPass >= nRequiredPassingTracks) {
-   //        clusters.push_back(std::move(cl));
-   //    }
-   //}
-
-   
-   //GENMATCHED based clustering
-   
-   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
-   // clusterizer->clusters(pv, t_trks_SV);
-
-   //std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
-   ////
-   //// helper lambda: match track index by (pt, eta, phi) within tolerance
-   //auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
-   //  const auto& ref = trk.track();
-   //  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
-   //    const auto& cand = t_trks_SV[i].track();
-   //    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
-   //        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
-   //        std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
-   //      return static_cast<int>(i);
-   //    }
-   //  }
-   //  return -1;  // not found
-   //};
-
-   ////Keep based on seed track
-   //for (auto& cl : clustersAll) {
-   //  int k = matchIndex(cl.seedingTrack);
-   //  if (k >= 0) {
-   //      size_t origIdx = t_trks_SV_indices[k];
-   //      if (genmatched_indices.count(origIdx)) {
-   //          clusters.push_back(std::move(cl));
-   //      }
-   //  }
-   //}
-
-   //Keep based on number of tracks that are present in genmatched indices
-   //int nRequiredGenMatchedTracks = 1;  // <-- configurable
-
-   //for (auto& cl : clustersAll) {
-   //    int nGenMatched = 0;
-   //
-   //    // loop over all tracks in the cluster
-   //    for (const auto& trk : cl.tracks) {
-   //        int k = matchIndex(trk);
-   //        if (k >= 0) {
-   //            size_t origIdx = t_trks_SV_indices[k];
-   //            if (expanded_indices.count(origIdx)) { // check if gen matched
-   //                ++nGenMatched;
-   //                if (nGenMatched >= nRequiredGenMatchedTracks) break;
-   //            }
-   //        }
-   //    }
-   //
-   //    if (nGenMatched >= nRequiredGenMatchedTracks) {
-   //        clusters.push_back(std::move(cl));
-   //    }
-   //}
-
-   std::vector<TransientVertex> recoVertices;
-   VertexDistanceXY vertTool2D;
-   VertexDistance3D vertTool3D;
-   for (std::vector<TracksClusteringFromDisplacedSeed::Cluster>::iterator cluster = clusters.begin(); cluster != clusters.end(); ++cluster) {
-          if (cluster->tracks.size()<2) continue; 
-          
-          // fit one or more vertices from the tracks in one cluster
-          std::vector<TransientVertex> tmp_vertices = vtxmaker_.vertices(cluster->tracks);
-          
-          
-          
-          for (std::vector<TransientVertex>::iterator v = tmp_vertices.begin(); v != tmp_vertices.end(); ++v) {
-
-            reco::Vertex tmpvtx(*v);
-            // Compute flight distance significance w.r.t. primary vertex
-            // Assume primary vertex is the first vertex in recoVertices
-            if (!recoVertices.empty()) {
-                Measurement1D dist2D = vertTool2D.distance(tmpvtx, pv);
-                Measurement1D dist3D = vertTool3D.distance(tmpvtx, pv);
-
-                // Apply your significance cut
-                if (dist2D.significance() < 2.5 || dist3D.significance() < 0.5) {
-                    continue; // skip this vertex
-                }
-            }
-
-            
-	        recoVertices.push_back(*v);
-          }
-    }
+// 	  std::cerr << "node_probs_flat size = " << node_probs_flat.size() << "\n";
+//s	td::cerr << "edge_probs_flat size = " << edge_probs_flat.size() << "\n";
+//
+//f	loat minNP=1e9, maxNP=-1e9;
+//f	or (float v : node_probs_flat) { minNP = std::min(minNP,v); maxNP = std::max(maxNP,v); }
+//s	td::cerr << "node_probs range: [" << minNP << ", " << maxNP << "]\n";
+//
+//f	loat minEP=1e9, maxEP=-1e9;
+//f	or (float v : edge_probs_flat) { minEP = std::min(minEP,v); maxEP = std::max(maxEP,v); }
+//s	td::cerr << "edge_probs range: [" << minEP << ", " << maxEP << "]\n";
+   	
 
 
-    vertexMerge(recoVertices, 0.7, 2);
+
+//B	uild IVF - like
+   	std::unordered_set<size_t> selected_indices;
+   	for (size_t i = 0; i < alltracks.size(); ++i) {
+   	    //const reco::Track& trk = alltracks[i];
+
+   	    //double dz = trk.dz(pv.position());
+   	    //if (
+   	    //         (alltracks[i].pt() > 0.8) && 
+   	    //         (std::abs(alltracks[i].eta())<2.5) //NEED TO REMAP TRACKS AND EDGES IF UNCOMMENTED
+   	    //          && (std::abs(dz) < 0.3)
+   	    // )
+   	    //     {
+   	    //     selected_indices.insert(i);
+
+   	    //     }
+   	    selected_indices.insert(i);
+   	}
+
+   	std::cout << "selected_indices..size(): " << selected_indices.size() << "\n";
+   	std::cout << "alltracks.size(): " << alltracks.size() << "\n";
+   	
+   	//IVF is running on tracks passing threshold on GNN score
+   	std::unordered_set<size_t> expanded_indices = selected_indices;  // will include nearby tracks too
+
+   	   //IVF is running on genMatch tracks
+   	//std::unordered_set<size_t> expanded_indices(matched_indices.begin(), matched_indices.end());
+
+   	//std::cout << "matched_indices..size(): " << matched_indices.size() << "\n";
+   	//
+   	std::vector<reco::TransientTrack> t_trks_SV;
+   	std::vector<size_t> t_trks_SV_indices;
+
+   	// Step 3: Fill t_trks_SV with the full expanded set
+   	t_trks_SV.clear();  // if not already empty
+   	t_trks_SV_indices.clear();
+
+   	for (size_t idx : expanded_indices) {
+   	    t_trks_SV.push_back(t_trks[idx]);
+   	    t_trks_SV_indices.push_back(idx);
+   	}
+
+   	constexpr int C = 7;
+   	int N = static_cast<int>(t_trks_SV.size());
+   	int E = static_cast<int>(edge_probs_flat.size());
+   	
+   	// edge_index_flat_f is [E srcs | E dsts]
+   	if ((int)edge_index_flat_f.size() != 2 * E) {
+   	  std::cerr << "ERROR: edge_index_flat_f size = " << edge_index_flat_f.size()
+   	            << " but expected 2*E = " << (2*E) << "\n";
+   	     }
+
+   	// ---- Helpers for node probs
+   	auto nodeProb = [&](int i, int c) -> float {
+  	return node_probs_flat[i*C + c];
+   	};
+
+   	// ---- Build fast undirected edge score lookup
+   	auto pack = [&](int a, int b) -> uint64_t {
+   	  return (uint64_t(uint32_t(a)) << 32) | uint32_t(b);
+   	};
+   	struct U64Hash { size_t operator()(uint64_t x) const noexcept { return std::hash<uint64_t>{}(x); } };
+   	
+   	std::unordered_map<uint64_t, float, U64Hash> edgeScore;
+   	edgeScore.reserve((size_t)E * 2);
+   	
+   	auto edgeSrc = [&](int e) -> int {
+   	  return static_cast<int>(edge_index_flat_f[e]);       // first E entries
+   	};
+   	auto edgeDst = [&](int e) -> int {
+   	  return static_cast<int>(edge_index_flat_f[E + e]);   // second E entries
+   	};
+   	
+   	for (int e = 0; e < E; ++e) {
+   	  int src = edgeSrc(e);
+   	  int dst = edgeDst(e);
+   	  if (src < 0 || src >= N || dst < 0 || dst >= N) continue;
+   	
+   	  float pe = edge_probs_flat[e]; // already sigmoid
+   	  if (std::isnan(pe)) pe = 0.f;
+   	
+   	  edgeScore[pack(src, dst)] = pe;
+   	  edgeScore[pack(dst, src)] = pe;
+   	}
+
+   	//---------Clustering
+   	auto clustersAll = clusterizer->clusters(pv, t_trks_SV);
+
+   	// ---- Track index matcher (same as your old code)
+   	auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
+   	  const auto& ref = trk.track();
+   	  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
+   	    const auto& cand = t_trks_SV[i].track();
+   	    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
+   	        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
+		std::abs(cand.phi() - ref.phi()) < 1e-5) {
+   	      return static_cast<int>(i);
+   	    }
+   	  }
+   	  return -1;
+   	};
+
+   	//PARAMETERS -need to move to config
+   	   float EdgeCut_ = 0.5;
+   	   float EdgeFracCut_ = 0.0;           
+   	   float MeanEdgeCut_ = 0.0;
+   	   float MeanClassCut_ = 0.3;
+   	   float MeanMaxClassProbCut_ = 0.0;
+   	   int   MinClusterSize_ = 2;
+
+   	 std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
+   	 clusters.reserve(clustersAll.size());
+   	 
+   	 for (auto& cl : clustersAll) {
+   	 
+   	   std::vector<int> idxs;
+   	   idxs.reserve(cl.tracks.size());
+   	 
+   	   for (auto const& tt : cl.tracks) {
+   	     int k = matchIndex(tt); //Currently using one to one matching to by pass remapping, need to fix this and edge index if remap
+   	     if (k >= 0) {idxs.push_back(k);}
+   	   }
+   	   if ((int)idxs.size() < MinClusterSize_) continue;
+   	 
+   	   // ---- (1) Node probability based on important classes
+   	   float meanP[7] = {0.f,0.f,0.f,0.f,0.f,0.f,0.f};
+   	   for (int i : idxs) {
+   	     for (int c = 0; c < 7; ++c) meanP[c] += nodeProb(i, c);
+   	   }
+   	   for (int c = 0; c < 7; ++c) meanP[c] /= float(idxs.size());
+   	 
+   	   float meanSV   = meanP[2] + meanP[3] + meanP[4];              // labels 3,4,5
+   	   float best345  = std::max({meanP[2], meanP[3], meanP[4]});    // dominant among them
+   	 
+   	   if (meanSV  < MeanClassCut_) continue;
+   	   if (best345 < MeanMaxClassProbCut_) continue;
+
+	   //int nodes_with_edges = 0;
+	   //for (int i : idxs) {
+	   //  for (int e = 0; e < E; ++e) {
+	   //    if (edgeSrc(e) == i || edgeDst(e) == i) {
+	   //      nodes_with_edges++;
+	   //      break;
+	   //    }
+	   //  }
+	   //}
+	   //
+	   //std::cout << "cluster size=" << idxs.size()
+	   //          << " nodes_with_edges=" << nodes_with_edges
+	   //          << std::endl;
+
+   	 
+   	   // ---- (2) Edge check within cluster (if edges exist)
+   	   int n_present = 0;
+   	   int n_pass    = 0;
+   	   float sum_edge = 0.f;
+   	 
+   	   for (size_t a = 0; a < idxs.size(); ++a) {
+   	     for (size_t b = a + 1; b < idxs.size(); ++b) {
+   	       int i = idxs[a], j = idxs[b];
+   	       auto it = edgeScore.find(pack(i, j));
+   	       if (it == edgeScore.end()) continue; // "if any"
+   	 
+   	       float pe = it->second;
+   	       n_present++;
+   	       sum_edge += pe;
+   	       if (pe > EdgeCut_) n_pass++;
+   	     }
+   	   }
+		
+	   //long long possible = 1LL*idxs.size()*(idxs.size()-1)/2;
+           //std::cout << "cluster size=" << idxs.size()
+           //<< " possible_pairs=" << possible
+           //<< " n_present=" << n_present
+           //<< " n_pass=" << n_pass
+           //<< " sum_edge=" << sum_edge
+           //<< std::endl;
+   	 
+   	   if (n_present > 0) {
+   	     float frac = float(n_pass) / float(n_present);
+   	     float mean = sum_edge / float(n_present);
+   	     if (frac < EdgeFracCut_) continue;
+   	     if (mean < MeanEdgeCut_) continue;
+   	   }
+   	   //else continue;
+   	 
+   	   clusters.push_back(std::move(cl));
+   	 }
+
+   	 std::cout << "clusters size" << clusters.size() << std::endl;
+
+   	
+
+   	 
+   	 // IVF default clustering
+
+   	//std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters = clusterizer->clusters(pv, t_trks_SV);
+   	
+   	//MODEL based cluster filtering
+
+   	   
+   	//GENMATCHED based clustering
+   	
+   	//std::vector<TracksClusteringFromDisplacedSeed::Cluster> clustersAll =
+   	// clusterizer->clusters(pv, t_trks_SV);
+
+   	//std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
+   	////
+   	//// helper lambda: match track index by (pt, eta, phi) within tolerance
+   	//auto matchIndex = [&](const reco::TransientTrack& trk) -> int {
+   	//  const auto& ref = trk.track();
+   	//  for (size_t i = 0; i < t_trks_SV.size(); ++i) {
+   	//    const auto& cand = t_trks_SV[i].track();
+   	//    if (std::abs(cand.pt()  - ref.pt())  < 1e-5 &&
+   	//        std::abs(cand.eta() - ref.eta()) < 1e-5 &&
+   	//        std::abs(reco::deltaPhi(cand.phi(), ref.phi())) < 1e-5) {
+   	//      return static_cast<int>(i);
+   	//    }
+   	//  }
+   	//  return -1;  // not found
+   	//};
+
+   	////Keep based on seed track
+   	//for (auto& cl : clustersAll) {
+   	//  int k = matchIndex(cl.seedingTrack);
+   	//  if (k >= 0) {
+   	//      size_t origIdx = t_trks_SV_indices[k];
+   	//      if (genmatched_indices.count(origIdx)) {
+   	//          clusters.push_back(std::move(cl));
+   	//      }
+   	//  }
+   	//}
+
+   	//Keep based on number of tracks that are present in genmatched indices
+   	//int nRequiredGenMatchedTracks = 1;  // <-- configurable
+
+   	//for (auto& cl : clustersAll) {
+   	//    int nGenMatched = 0;
+   	//
+   	//    // loop over all tracks in the cluster
+   	//    for (const auto& trk : cl.tracks) {
+   	//        int k = matchIndex(trk);
+   	//        if (k >= 0) {
+   	//            size_t origIdx = t_trks_SV_indices[k];
+   	//            if (expanded_indices.count(origIdx)) { // check if gen matched
+   	//                ++nGenMatched;
+   	//                if (nGenMatched >= nRequiredGenMatchedTracks) break;
+   	//            }
+   	//        }
+   	//    }
+   	//
+   	//    if (nGenMatched >= nRequiredGenMatchedTracks) {
+   	//        clusters.push_back(std::move(cl));
+   	//    }
+   	//}
+
+   	std::vector<TransientVertex> recoVertices;
+   	VertexDistanceXY vertTool2D;
+   	VertexDistance3D vertTool3D;
+   	for (std::vector<TracksClusteringFromDisplacedSeed::Cluster>::iterator cluster = clusters.begin(); cluster != clusters.end(); ++cluster) {
+   	       if (cluster->tracks.size()<2) continue; 
+   	       
+   	       // fit one or more vertices from the tracks in one cluster
+   	       std::vector<TransientVertex> tmp_vertices = vtxmaker_.vertices(cluster->tracks);
+   	       
+   	       
+   	       
+   	       for (std::vector<TransientVertex>::iterator v = tmp_vertices.begin(); v != tmp_vertices.end(); ++v) {
+
+   	         reco::Vertex tmpvtx(*v);
+   	         // Compute flight distance significance w.r.t. primary vertex
+   	         // Assume primary vertex is the first vertex in recoVertices
+   	         if (!recoVertices.empty()) {
+   	             Measurement1D dist2D = vertTool2D.distance(tmpvtx, pv);
+   	             Measurement1D dist3D = vertTool3D.distance(tmpvtx, pv);
+
+   	             // Apply your significance cut
+   	             if (dist2D.significance() < 2.5 || dist3D.significance() < 0.5) {
+   	                 continue; // skip this vertex
+   	             }
+   	         }
+
+   	         
+   	             recoVertices.push_back(*v);
+   	       }
+   	 }
 
 
-    double dRCut              = 0.4;
-    double distCut            = 0.07;
-    double sigCut             = 3.0; 
-    double dLenFraction       = 0.333; 
-    double fitterSigmacut     = 3.0; 
-    double fitterTini         = 256.0; 
-    double fitterRatio        = 0.25; 
-    double maxTimeSig         = 3.0;
-    int    trackMinLayers     = 4;
-    double trackMinPt         = 0.4;
-    int    trackMinPixels     = 1;
-	
-    std::vector<TransientVertex> newVTXs = TrackVertexArbitrator(
-      pv,
-      beamSpotHandle,
-      recoVertices,
-      t_trks_SV,
-      dRCut,
-      distCut,
-      sigCut,
-      dLenFraction,
-      fitterSigmacut,
-      fitterTini,
-      fitterRatio,
-      maxTimeSig,
-      trackMinLayers,
-      trackMinPt,
-      trackMinPixels
-   );
+   	 vertexMerge(recoVertices, 0.7, 2);
+
+
+   	 double dRCut              = 0.4;
+   	 double distCut            = 0.07;
+   	 double sigCut             = 3.0; 
+   	 double dLenFraction       = 0.333; 
+   	 double fitterSigmacut     = 3.0; 
+   	 double fitterTini         = 256.0; 
+   	 double fitterRatio        = 0.25; 
+   	 double maxTimeSig         = 3.0;
+   	 int    trackMinLayers     = 4;
+   	 double trackMinPt         = 0.4;
+   	 int    trackMinPixels     = 1;
+   	     
+   	 std::vector<TransientVertex> newVTXs = TrackVertexArbitrator(
+   	   pv,
+   	   beamSpotHandle,
+   	   recoVertices,
+   	   t_trks_SV,
+   	   dRCut,
+   	   distCut,
+   	   sigCut,
+   	   dLenFraction,
+   	   fitterSigmacut,
+   	   fitterTini,
+   	   fitterRatio,
+   	   maxTimeSig,
+   	   trackMinLayers,
+   	   trackMinPt,
+   	   trackMinPixels
+   	);
 
   
-   vertexMerge(newVTXs, 0.2, 10);
-   std::cout << "newVTXs size" << newVTXs.size() << std::endl;
+   	vertexMerge(newVTXs, 0.2, 10);
+   	std::cout << "newVTXs size" << newVTXs.size() << std::endl;
 
 
-   int nvtx=0;
-   for(size_t ivtx=0; ivtx<newVTXs.size(); ivtx++){
-   	    reco::Vertex tmpvtx(newVTXs[ivtx]);
-        const auto& vtx = newVTXs[ivtx];
-        const auto& trks = vtx.originalTracks();
-        int track_per_sv_counter = 0;
-        for (const auto& ttrk : trks) {
-            track_per_sv_counter++;
-	        //const reco::Track& trk = ttrk.track();
-            //reco::CandidatePtr trackPtr = 
-            SVrecoTrk_SVrecoIdx.push_back(nvtx);
-            const reco::Track& trk = ttrk.track();
-            SVrecoTrk_pt.push_back(trk.pt());
-            SVrecoTrk_eta.push_back(trk.eta());
-            SVrecoTrk_phi.push_back(trk.phi());
+   	int nvtx=0;
+   	for(size_t ivtx=0; ivtx<newVTXs.size(); ivtx++){
+   		    reco::Vertex tmpvtx(newVTXs[ivtx]);
+   	     const auto& vtx = newVTXs[ivtx];
+   	     const auto& trks = vtx.originalTracks();
+   	     int track_per_sv_counter = 0;
+   	     for (const auto& ttrk : trks) {
+   	         track_per_sv_counter++;
+   	             //const reco::Track& trk = ttrk.track();
+   	         //reco::CandidatePtr trackPtr = 
+   	         SVrecoTrk_SVrecoIdx.push_back(nvtx);
+   	         const reco::Track& trk = ttrk.track();
+   	         SVrecoTrk_pt.push_back(trk.pt());
+   	         SVrecoTrk_eta.push_back(trk.eta());
+   	         SVrecoTrk_phi.push_back(trk.phi());
 
-            //reco::TransientTrack ttrk = theB->build(trk);
-            auto ip3d_trk = IPTools::signedImpactParameter3D(ttrk, direction, pv).second;
-            auto ip2d_trk = IPTools::signedTransverseImpactParameter(ttrk, direction, pv).second;
-            SVrecoTrk_ip3d.push_back(ip3d_trk.value());
-            SVrecoTrk_ip2d.push_back(ip2d_trk.value());
-
-
+   	         //reco::TransientTrack ttrk = theB->build(trk);
+   	         auto ip3d_trk = IPTools::signedImpactParameter3D(ttrk, direction, pv).second;
+   	         auto ip2d_trk = IPTools::signedTransverseImpactParameter(ttrk, direction, pv).second;
+   	         SVrecoTrk_ip3d.push_back(ip3d_trk.value());
+   	         SVrecoTrk_ip2d.push_back(ip2d_trk.value());
 
 
-        }
-        nvtx++;
-        SV_x_reco.push_back(tmpvtx.position().x());
-        SV_y_reco.push_back(tmpvtx.position().y());
-        SV_z_reco.push_back(tmpvtx.position().z());
-        SV_reco_nTracks.push_back(track_per_sv_counter);
-        SV_chi2_reco.push_back(tmpvtx.normalizedChi2()); 
-   }
-   nSVs_reco.push_back(nvtx);
 
+
+   	     }
+   	     nvtx++;
+   	     SV_x_reco.push_back(tmpvtx.position().x());
+   	     SV_y_reco.push_back(tmpvtx.position().y());
+   	     SV_z_reco.push_back(tmpvtx.position().z());
+   	     SV_reco_nTracks.push_back(track_per_sv_counter);
+   	     SV_chi2_reco.push_back(tmpvtx.normalizedChi2()); 
+   	}
+   	nSVs_reco.push_back(nvtx);
+    }
 
     
    int nhads = 0;
@@ -1581,7 +1688,7 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("SVtrk_ip3d", &SVtrk_ip3d);
     tree->Branch("SVtrk_ip3dsig", &SVtrk_ip3dsig);
         
-    tree->Branch("preds", &preds);
+    tree->Branch("Edge_probs", &preds);
 	tree->Branch("cut_val", &cut);
 
 	tree->Branch("nSVs_reco", &nSVs_reco);

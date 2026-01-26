@@ -3,9 +3,9 @@
 # -----------------------------
 # Directory paths
 # -----------------------------
-INPUT_DIR="/store/user/nvenkata/BTV/toproc_1111/"
+INPUT_DIR="/store/user/nvenkata/BTV/toproc_1201/"
 TMP_DIR="/uscms/home/nvenkata/nobackup/BTV/preprocess/tmp"
-OUTPUT_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311"
+OUTPUT_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201"
 EOS_PREFIX="root://cmseos.fnal.gov/"
 
 mkdir -p "$TMP_DIR"
@@ -13,7 +13,7 @@ mkdir -p "$TMP_DIR"
 # Parameters for event processing
 START_EVT=0
 END_EVT=-1
-DOWNSAMPLE=0.4
+DOWNSAMPLE=0.5
 
 # -----------------------------
 # Define the per-file job function

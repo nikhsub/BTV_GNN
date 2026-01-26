@@ -37,7 +37,55 @@ args = parser.parse_args()
 trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig','trk_ip2dsig', 'trk_ip3dsig',  'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-batchsize = 1000
+def scan_graph_for_nans(graphs):
+    bad_graphs = []
+    for i, g in enumerate(graphs):
+        problems = []
+
+        # Node features
+        if torch.isnan(g.x).any():
+            problems.append("NaN in x")
+        if torch.isinf(g.x).any():
+            problems.append("Inf in x")
+
+        # Edge features
+        if hasattr(g, "edge_attr"):
+            if torch.isnan(g.edge_attr).any():
+                problems.append("NaN in edge_attr")
+            if torch.isinf(g.edge_attr).any():
+                problems.append("Inf in edge_attr")
+
+        # Labels
+        if hasattr(g, "y"):
+            if torch.isnan(g.y).any():
+                problems.append("NaN in y")
+            if torch.isinf(g.y).any():
+                problems.append("Inf in y")
+
+        # Edge labels
+        if hasattr(g, "edge_y"):
+            if torch.isnan(g.edge_y).any():
+                problems.append("NaN in edge_y")
+            if torch.isinf(g.edge_y).any():
+                problems.append("Inf in edge_y")
+
+        # Edge index (should be integer)
+        if (g.edge_index < 0).any():
+            problems.append("Negative index")
+        if (g.edge_index >= g.x.shape[0]).any():
+            problems.append("Out-of-bounds edge_index")
+
+        if problems:
+            bad_graphs.append((i, problems))
+
+    if len(bad_graphs) == 0:
+        print("✔ No NaNs/Infs or bad indices found in dataset.")
+    else:
+        print(f"✖ Found {len(bad_graphs)} bad graphs:")
+        for idx, issues in bad_graphs[:10]:  # print only first few
+            print(f"  Graph {idx}: {issues}")
+
+    return bad_graphs
 
 def count_node_classes(graphs):
     counts = np.zeros(7, dtype=np.int64)
@@ -46,26 +94,49 @@ def count_node_classes(graphs):
         counts += y.sum(axis=0).astype(np.int64)
     print("Class counts:", counts, "total:", counts.sum())
 
-def compute_ce_node_weight(graphs, device):
+def compute_ce_node_weight(
+    graphs,
+    device,
+    focus_classes=(2, 3, 4),
+    focus_mean=4.0,
+    other_weight=1.0,
+):
     """
-    Computes class weights for CrossEntropyLoss from one-hot labels.
-    Intended for exclusive 7-class classification.
+    Compute class weights for CrossEntropyLoss.
+    - Only `focus_classes` (e.g. 2,3,4) are upweighted using inverse frequency.
+    - Their *average* weight is set to `focus_mean` (e.g. 3.0).
+    - All other classes get `other_weight` (default 1.0).
     """
-    class_counts = np.zeros(7, dtype=np.int64)
+    num_classes = 7
+    class_counts = np.zeros(num_classes, dtype=np.int64)
 
+    # Count one-hot labels over all graphs
     for g in graphs:
-        y = g.y.cpu().numpy()  # [N,7]
+        y = g.y.cpu().numpy()  # [N, 7] one-hot
         class_counts += y.sum(axis=0).astype(np.int64)
-    # Total number of nodes
-    total = class_counts.sum()
-    # Avoid division by zero
-    class_counts = np.maximum(class_counts, 1)
-    # inverse frequency weighting
-    inv_freq = total / class_counts  # bigger weight = rarer class
-    # normalize (optional but recommended)
-    inv_freq = inv_freq / inv_freq.mean()
 
-    return torch.tensor(inv_freq, dtype=torch.float32, device=device)
+    # Avoid zeros
+    class_counts = np.maximum(class_counts, 1)
+
+    weights = np.full(num_classes, other_weight, dtype=np.float32)
+
+    # Focus classes: 2, 3, 4
+    focus_idx = np.array(focus_classes, dtype=int)
+    focus_counts = class_counts[focus_idx]
+
+    # Inverse frequency for focus classes only
+    total_focus = float(focus_counts.sum())
+    inv_freq = total_focus / focus_counts  # larger for rarer
+
+    # Normalize so that mean weight of focus classes = focus_mean
+    current_mean = inv_freq.mean()
+    scaled = inv_freq * (focus_mean / current_mean)
+
+    # Assign to weight vector
+    for i, cls in enumerate(focus_classes):
+        weights[cls] = scaled[i]
+
+    return torch.tensor(weights, dtype=torch.float32, device=device)
 
 def compute_edge_pos_weight(graphs, device):
     total_pos = 0
@@ -83,9 +154,10 @@ def compute_edge_pos_weight(graphs, device):
     weight = total_neg / total_pos
     return torch.tensor([weight], device=device)
 
+batchsize = 1000
 
 EOS_PREFIX = "root://cmseos.fnal.gov/"
-EOS_DIR = "/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/test"
+EOS_DIR = "/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
 local_cache = "/uscms/home/nvenkata/nobackup/BTV/IVF/tmp_pt"
 os.makedirs(local_cache, exist_ok=True)
 train_hads = []
@@ -119,6 +191,16 @@ for remote_file in tqdm(pt_files, desc="Loading EOS .pt files", unit="file"):
 
 print(f"Loaded {len(train_hads)} records from {len(pt_files)} torch files.")
 
+bad_graphs = scan_graph_for_nans(train_hads)
+
+# Remove bad graphs
+if len(bad_graphs) > 0:
+    bad_indices = [idx for idx, _ in bad_graphs]
+    print("Removing bad graph indices:", bad_indices)
+
+    for idx in sorted(bad_indices, reverse=True):
+        train_hads.pop(idx)
+
 #train_hads = train_hads[:] #Control number of input samples here - see array splicing for more
 #val_evts   = val_evts[0:1500]
 
@@ -141,8 +223,8 @@ pos_w_edge = compute_edge_pos_weight(train_hads, device)
 print(f"Node pos weight: {pos_w_node}")
 print(f"Edge pos weight: {pos_w_edge.item():.2f}")
 #model = TrackEdgeGNN(node_in_dim=len(trk_features), edge_in_dim=len(edge_features), hidden_dim=64).to(device)
-model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features))
-optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+model = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features))
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
     """Focal loss to emphasize hard-to-classify samples"""
@@ -156,7 +238,7 @@ def focal_loss(preds, labels, gamma=2.7, alpha=0.9):
 
 #TRAIN
 def train(model, train_loader, optimizer, device,
-          node_loss_weight=1.0, edge_loss_weight=0.5):
+          node_loss_weight=1.0, edge_loss_weight=0.6):
 
     model.to(device)
     model.train()

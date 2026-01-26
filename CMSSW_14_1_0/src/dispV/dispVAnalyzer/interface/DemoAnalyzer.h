@@ -108,6 +108,7 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       float sigmoid(float x);
       
       const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> theTTBToken;
+      bool training_;
       edm::EDGetTokenT<pat::PackedCandidateCollection> TrackCollT_;
       edm::EDGetTokenT<reco::VertexCollection> PVCollT_;
       edm::EDGetTokenT<edm::View<reco::VertexCompositePtrCandidate>> SVCollT_;

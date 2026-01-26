@@ -3,7 +3,6 @@ warnings.filterwarnings("ignore")
 
 import torch
 from GCNModel import *
-import pickle
 import argparse
 import torch_geometric
 from torch_geometric.data import Data, DataLoader
@@ -20,10 +19,10 @@ parser.add_argument("-o", "--output", default="testmod", help="Name of output on
 args = parser.parse_args()
 
 
-trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_ip2dsig', 'trk_ip3dsig', 'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
+trk_features = ['trk_eta', 'trk_phi', 'trk_ip2d', 'trk_ip3d', 'trk_dz', 'trk_dzsig','trk_ip2dsig', 'trk_ip3dsig',  'trk_p', 'trk_pt', 'trk_nValid', 'trk_nValidPixel', 'trk_nValidStrip', 'trk_charge']
 edge_features = ['dca', 'deltaR', 'dca_sig', 'cptopv', 'pvtoPCA_1', 'pvtoPCA_2', 'dotprod_1', 'dotprod_2', 'pair_mom', 'pair_invmass']
 
-model = GNNModel(indim=len(trk_features), outdim=128, edge_dim=len(edge_features))
+model = GNNModel(indim=len(trk_features), outdim=64, edge_dim=len(edge_features))
 model.load_state_dict(torch.load(args.load_model, map_location=torch.device('cpu')))
 model.eval()
 
@@ -40,14 +39,18 @@ print(device)
 
 print(f"Loading data from {args.file}...")
 with open(args.file, 'rb') as f:
-    graphs = pickle.load(f)
+    graphs = torch.load(f)
 
 data = graphs[10]
 
-# Random example inputs
 x_in = data.x.unsqueeze(0).to(device)
-edge_index = data.edge_index.unsqueeze(0).to(device)
+edge_index = data.edge_index.unsqueeze(0).to(device).float()
 edge_attr = data.edge_attr.unsqueeze(0).to(device)
+
+# Random example inputs
+#x_in = data.x.to(device)
+#edge_index = data.edge_index.to(device)
+#edge_attr = data.edge_attr.to(device)
 
 model.to(device)
 
@@ -65,7 +68,7 @@ with torch.no_grad():
         outname,
         opset_version=18,
         input_names=["x_in", "edge_index", "edge_attr"],
-        output_names=["xf", "node_probs"],
+        output_names=["node_logits", "edge_logits", "node_probs", "edge_probs"],
         dynamic_axes={
             "x_in": {1: "num_nodes"},
             "edge_index": {2: "num_edges"},
@@ -87,30 +90,33 @@ onnx_inputs = {
 
 # Run inference with ONNX model
 onnx_outputs = session.run(None, onnx_inputs)
-onnx_node_probs = torch.tensor(onnx_outputs[1])
+onnx_node_probs = torch.tensor(onnx_outputs[2])
+onnx_edge_probs = torch.tensor(onnx_outputs[3])
 
 # Get outputs from PyTorch model again
 with torch.no_grad():
-    _, torch_node_probs = model(x_in, edge_index, edge_attr)  # force edge_index to long
-
-torch_logits_np = torch_node_probs.cpu().numpy().flatten()
-onnx_logits_np = onnx_node_probs.cpu().numpy().flatten()
-x_in_np = x_in.squeeze(0).cpu().numpy()  # shape: [num_nodes, num_features]
+    _, _, torch_node_probs, torch_edge_probs = model(x_in, edge_index, edge_attr)  # force edge_index to long
 
 diff_threshold = 0.5
 
 # Compare outputs
-abs_diff = torch.abs(torch_node_probs.cpu() - onnx_node_probs.cpu())
-max_diff = abs_diff.max().item()
-mean_diff = abs_diff.mean().item()
+abs_diff_node = torch.abs(torch_node_probs.cpu() - onnx_node_probs.cpu())
+max_diff_node = abs_diff_node.max().item()
+mean_diff_node = abs_diff_node.mean().item()
+
+abs_diff_edge = torch.abs(torch_edge_probs.cpu() - onnx_edge_probs.cpu())
+max_diff_edge = abs_diff_edge.max().item()
+mean_diff_edge = abs_diff_edge.mean().item()
 
 print(f"ONNX vs PyTorch consistency check:")
-print(f"Max difference:  {max_diff:.6e}")
-print(f"Mean difference: {mean_diff:.6e}")
+print(f"Max node difference:  {max_diff_node:.6e}")
+print(f"Mean node difference: {mean_diff_node:.6e}")
+print("==========================================")
+
+print(f"Max edge difference:  {max_diff_edge:.6e}")
+print(f"Mean edge difference: {mean_diff_edge:.6e}")
 
 print(f"ONNX model saved to {outname}")
-
-import onnx
 
 model = onnx.load(outname)
 scatter_nodes = [n for n in model.graph.node if n.op_type == "ScatterND"]

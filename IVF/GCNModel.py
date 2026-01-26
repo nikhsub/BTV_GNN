@@ -125,7 +125,7 @@ class GNNModel(torch.nn.Module):
         """
 
         # Unpack batch dim (you were using unsqueeze(0) in the caller)
-        num_nodes, _ = x_in.shape
+        _, num_nodes, _ = x_in.shape
 
         edge_index = edge_index.long()
 
