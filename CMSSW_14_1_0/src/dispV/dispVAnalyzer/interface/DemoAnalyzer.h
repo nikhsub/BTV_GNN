@@ -9,6 +9,13 @@
 #include <cmath>
 #include <algorithm>
 #include <utility>
+#include <cctype>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <fstream>
+#include <iostream>
+#include <map>
 
 // user include files
 #include "FWCore/Framework/interface/Frameworkfwd.h"
@@ -127,7 +134,14 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::unique_ptr<TracksClusteringFromDisplacedSeed> clusterizer;
       std::string genmatch_csv_;
 
-      std::map<std::tuple<unsigned int, unsigned int, unsigned int>, std::vector<int>> sigMatchMap_;
+      struct SigMatchEntry {
+      std::vector<int> indices;  // track indices i
+      std::vector<int> labels;   // trk_labels[i]
+      std::vector<int> hadidx;   // trk_hadidx[i]
+      };
+
+      std::map<std::tuple<unsigned int, unsigned int, unsigned int>, SigMatchEntry> sigMatchMap_;
+
 
       unsigned int run_;
       unsigned int lumi_;

@@ -76,8 +76,8 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     TrackPredCut = cms.untracked.double(0.0),
     #TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/fullconn_out64_2601.onnx")
-    #genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_3k_0210.csv")
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/fullconn_out64_2601.onnx"),
+    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_test2701.csv")
 )
 process.TFileService = cms.Service("TFileService",
         fileName = cms.string("output_ttbarhad.root"),

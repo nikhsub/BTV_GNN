@@ -141,7 +141,7 @@ for i, evt in enumerate(tree):
     nHads = evt.nHadrons[0]
     had_pt.reserve(nHads)
     had_pt.assign(evt.Hadron_pt.begin(), evt.Hadron_pt.end());
-    preds.assign(evt.preds.begin(), evt.preds.end())
+    #preds.assign(evt.preds.begin(), evt.preds.end())
 
     run.push_back(int(evt.run))
     lumi.push_back(int(evt.lumi))
