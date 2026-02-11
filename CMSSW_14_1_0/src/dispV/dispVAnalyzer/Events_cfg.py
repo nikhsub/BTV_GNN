@@ -23,7 +23,7 @@ process.load('RecoTracker.Configuration.RecoTracker_cff')
 #process.load('Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff')
 process.GlobalTag.globaltag =  cms.string("106X_upgrade2018_realistic_v16_L1v1")
 
-process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(100))
+process.maxEvents = cms.untracked.PSet( input = cms.untracked.int32(3000))
 
 ClusteringParam = cms.PSet(
           seedMax3DIPSignificance =  cms.double(9999.0),
@@ -76,8 +76,8 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     TrackPredCut = cms.untracked.double(0.0),
     #TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/fullconn_out64_2601.onnx"),
-    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_test2701.csv")
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/out64_submod_marginup_0502.onnx"),
+    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_testntup0602.csv")
 )
 process.TFileService = cms.Service("TFileService",
         fileName = cms.string("output_ttbarhad.root"),

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # EOS directory to copy FROM
-EOS_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/"
+EOS_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/excess"
 
 # Local directory to copy TO
 LOCAL_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/btv"

@@ -614,7 +614,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   SV_reco_nTracks.clear();
   SV_chi2_reco.clear();
   Hadron_SVRecoIdx.clear();
-    Hadron_SVRecoDistance.clear();
+  Hadron_SVRecoDistance.clear();
+
+  sv_score_sig.clear();
+  sv_score_bkg.clear();
+  edge_score_sig.clear();
+  edge_score_bkg.clear();
 
 
   Handle<PackedCandidateCollection> patcan;
@@ -709,9 +714,18 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    std::vector<Measurement1D> ip2d_vals(num_tracks);
    std::vector<Measurement1D> ip3d_vals(num_tracks);
 
+   std::vector<int> origToNode(num_tracks, -1);
+   std::vector<int> nodeToOrig;
+   nodeToOrig.reserve(num_tracks);
+   int node = 0;
+
    for (size_t i = 0; i< num_tracks; ++i) {
         t_trks[i] = (*theB).build(alltracks[i]);
         if (!(t_trks[i].isValid())) continue;
+
+	origToNode[i] = node;
+ 	nodeToOrig.push_back((int)i);	
+ 
         ip2d_vals[i] = IPTools::signedTransverseImpactParameter(t_trks[i], direction, pv).second;
         ip3d_vals[i] = IPTools::signedImpactParameter3D(t_trks[i], direction, pv).second;
 
@@ -733,6 +747,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
         trk_nValidPixel.push_back(alltracks[i].hitPattern().numberOfValidPixelHits());
         trk_nValidStrip.push_back(alltracks[i].hitPattern().numberOfValidStripHits());
         ntrk++;
+
+	node++;
     }
     
     size_t estimated_pairs = num_tracks * num_tracks / 2;  // Approximate number of pairs
@@ -859,8 +875,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    	std::vector<std::vector<float>> track_features;
    	std::vector<std::vector<float>> edge_features;
    	std::vector<int64_t> edge_i, edge_j;
-
-   	// Step 1: Build track_features, and track bad ones
+	
+	   // Step 1: Build track_features, and track bad ones
    	for (size_t i = 0; i < static_cast<size_t>(ntrk); ++i) {
    	    std::vector<float> features = {
    	        trk_eta[i],
@@ -901,11 +917,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    	 
    	
    	for (size_t idx = 0; idx < trk_i.size(); ++idx) {
-   	    int i = trk_i[idx];
-   	    int j = trk_j[idx];
+   	    int oi = trk_i[idx];
+   	    int oj = trk_j[idx];
 
-   	    edge_i.push_back(i);
-   	    edge_j.push_back(j);
+	    int ni = origToNode[oi];
+	    int nj = origToNode[oj];
+
+   	    edge_i.push_back(ni);
+   	    edge_j.push_back(nj);
    	    
    	     edge_features.push_back({
    	     dca[idx],
@@ -968,12 +987,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
    	std::vector<std::vector<float>> output = globalCache()->run(input_names_, data_, input_shapes_);
 
-   	const std::vector<float>& node_logits_flat = output[0];
-   	const std::vector<float>& edge_logits_flat = output[1];
-   	const std::vector<float>& node_probs_flat  = output[2]; // [N*7]
-   	const std::vector<float>& edge_probs_flat  = output[3]; // [E]
+   	const std::vector<float>& sv_logits_flat = output[0];
+   	const std::vector<float>& sv_sub_logits_flat = output[1];
+   	const std::vector<float>& edge_logits_flat  = output[2]; // [E]
 
-	preds = edge_probs_flat;
+	//preds = edge_probs_flat;
 
 
 // 	  std::cerr << "node_probs_flat size = " << node_probs_flat.size() << "\n";
@@ -1014,6 +1032,9 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    	//IVF is running on tracks passing threshold on GNN score
    	std::unordered_set<size_t> expanded_indices = selected_indices;  // will include nearby tracks too
 
+	std::vector<size_t> expanded_vec(expanded_indices.begin(), expanded_indices.end());
+	std::sort(expanded_vec.begin(), expanded_vec.end());
+	
    	   //IVF is running on genMatch tracks
    	//std::unordered_set<size_t> expanded_indices(matched_indices.begin(), matched_indices.end());
 
@@ -1026,95 +1047,143 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
    	t_trks_SV.clear();  // if not already empty
    	t_trks_SV_indices.clear();
 
-   	for (size_t idx : expanded_indices) {
+   	for (size_t idx : expanded_vec) {
    	    t_trks_SV.push_back(t_trks[idx]);
    	    t_trks_SV_indices.push_back(idx);
    	}
 
-	constexpr int C = 7;
-	int N = t_trks_SV.size();
-	int E = edge_probs_flat.size();
-		
-	// ------------------------------
-	// Tunable parameters (start here)
-	// ------------------------------
-	const float NodeHFcut      = 0.30f;  // pHF = p2+p3+p4
-	const float NodeMaxSVcut   = 0.10f;  // max(p2,p3,p4)
-	const float MarginCut      = 0.075f;  // maxSV - maxBkg
-	
-	const float EdgeMin        = 0.30f;  // keep edges above this as "present" for connectivity
-	const float EdgeStrongCut  = 0.60f;  // "strong" internal support
-	const int   MinClusterSize = 3;
-	
-	// k-core-ish pruning inside each component
-	const int   MinStrongNbrs  = 1;      // for small clusters; try 2 if you have larger comps
-	const float MinMeanEdge    = 0.40f;  // mean incident edge (within comp) requirement
-	const int   MaxPruneIters  = 10;
-	
-	// ------------------------------
-	// Helpers
-	// ------------------------------
-	auto nodeProb = [&](int i, int c) -> float {
-	  return node_probs_flat[i * C + c];
-	};
-	
-	auto pHF = [&](int i) -> float {
-	  return nodeProb(i,2) + nodeProb(i,3) + nodeProb(i,4);
-	};
-	
-	auto pSVbest = [&](int i) -> float {
-	  return std::max({nodeProb(i,2), nodeProb(i,3), nodeProb(i,4)});
-	};
-	
-	auto pBbest = [&](int i) -> float {
-	  // adjust these background classes to match your label scheme
-	  return std::max({nodeProb(i,0), nodeProb(i,1),  nodeProb(i,6)});
-	};
-	
-	auto isHF = [&](int i) -> bool {
-	  const float hf   = pHF(i);
-	  const float svmx = pSVbest(i);
-	  const float bmx  = pBbest(i);
-	  return (hf > NodeHFcut) && (svmx > NodeMaxSVcut) && ((svmx - bmx) > MarginCut);
-	};
+	  std::cout << "===== T_trks_SV  size=" << t_trks_SV.size() << " =====\n";
+	  std::cout << "===== All tracks size=" << alltracks.size() << " =====\n";
+	  std::cout << "===== valid tracks  size=" << trk_eta.size() << " =====\n";
 
-	auto nodeArgMax = [&](int i) -> int {
-          int bestc = 0;
-          float bestp = node_probs_flat[i*C + 0];
-          for (int c = 1; c < C; ++c) {
-            float p = node_probs_flat[i*C + c];
-            if (p > bestp) { bestp = p; bestc = c; }
-          }
-          return bestc;
-        };
+	
 
 
-	// edge index accessors
-	auto edgeSrc = [&](int e) -> int { return static_cast<int>(edge_index_flat_f[e]); };
-	auto edgeDst = [&](int e) -> int { return static_cast<int>(edge_index_flat_f[E + e]); };
+	// ============================================================================
+	// Vertexing from new model outputs:
+	//   sv_logits_flat      : [N,2]   (binary logits: [bkg, SV])
+	//   sv_sub_logits_flat  : [N,3]   (subclass logits among SV-like: [B, C, CfromB])
+	//   edge_logits_flat    : [E]     (edge logits; apply sigmoid)
+	//
+	// Assumes you already built t_trks_SV (size N) and the corresponding model inputs
+	// (x_in_flat, edge_index_flat_f, edge_attr_flat, edge_i/edge_j etc.) for those N tracks.
+	// Produces: comps (clusters of local node indices) and clustersTT (tracks per cluster)
+	// that you can feed into your AVR stage.
+	//
+	// IMPORTANT: edge_index_flat_f layout is [2*E] = [src0..src(E-1), dst0..dst(E-1)]
+	// ============================================================================
 	
-	// pack(u,v) helper for unordered_map key
+	// ------------------------------
+	// 1) Sizes / constants
+	// ------------------------------
+	constexpr int C_BIN  = 2; // sv logits per node
+	constexpr int C_SUB  = 3; // subclass logits per node (B/C/CfromB)
+	
+	int N = (int)t_trks_SV.size();
+
+
+       	// E from your edge construction. Prefer edge_i.size() if that's the number of edges you built.
+	int E = (int)edge_i.size();
+	
+	// Sanity checks against model outputs
+	assert((int)sv_logits_flat.size()     == N * C_BIN);
+	assert((int)sv_sub_logits_flat.size() == N * C_SUB);
+	assert((int)edge_logits_flat.size()   == E);
+	assert((int)edge_index_flat_f.size()  == 2 * E);
+	
+	// ------------------------------
+	// 2) Math helpers
+	// ------------------------------
+	auto sigmoid = [](float x) -> float {
+	  // stable-ish sigmoid
+	  if (x >= 0.f) {
+	    float z = std::exp(-x);
+	    return 1.f / (1.f + z);
+	  } else {
+	    float z = std::exp(x);
+	    return z / (1.f + z);
+	  }
+	};
+	
+	auto softmax2_prob1 = [&](int i) -> float {
+	  // sv_logits_flat layout: [N,2] with stride 2
+	  // take p(class=1) as SV probability
+	  float a = sv_logits_flat[i*2 + 0];
+	  float b = sv_logits_flat[i*2 + 1];
+	  float m = (a > b) ? a : b;
+	  float ea = std::exp(a - m);
+	  float eb = std::exp(b - m);
+	  return eb / (ea + eb);
+	};
+	
+	auto softmax3 = [&](int i, float out[3]) {
+	  // sv_sub_logits_flat layout: [N,3]
+	  float a = sv_sub_logits_flat[i*3 + 0];
+	  float b = sv_sub_logits_flat[i*3 + 1];
+	  float c = sv_sub_logits_flat[i*3 + 2];
+	  float m = std::max(a, std::max(b, c));
+	  float ea = std::exp(a - m);
+	  float eb = std::exp(b - m);
+	  float ec = std::exp(c - m);
+	  float s  = ea + eb + ec;
+	  out[0] = ea/s; out[1] = eb/s; out[2] = ec/s;
+	};
+	
+	auto pSV = [&](int i) -> float { return softmax2_prob1(i); };
+	
+	auto pSubBest = [&](int i) -> float {
+	  float p[3]; softmax3(i, p);
+	  return std::max({p[0], p[1], p[2]});
+	};
+	
+	auto subArgMax = [&](int i) -> int {
+	  float p[3]; softmax3(i, p);
+	  int a = 0;
+	  if (p[1] > p[a]) a = 1;
+	  if (p[2] > p[a]) a = 2;
+	  return a; // 0=B, 1=C, 2=CfromB (or however you define them)
+	};
+	
+	// ------------------------------
+	// 3) Edge index accessors (your layout is correct)
+	// ------------------------------
+	auto edgeSrc = [&](int e) -> int { return (int)edge_index_flat_f[e]; };
+	auto edgeDst = [&](int e) -> int { return (int)edge_index_flat_f[E + e]; };
+	auto pEdge   = [&](int e) -> float { return sigmoid(edge_logits_flat[e]); };
+	
+	// ------------------------------
+	// 4) Node preselection (SV-like)
+	// ------------------------------
+	// Start loose and tighten later.
+	const float NodeSVcut    = 0.10f;  // keep nodes with pSV > this
+	const float NodeSubBest  = 0.20f;  // optional, start 0.0 then try 0.3-0.5 later
+	
+	std::vector<char> keepNode(N, 0);
+	for (int i = 0; i < N; ++i) {
+	  float p = pSV(i);
+	  if (p <= NodeSVcut) continue;
+	  if (NodeSubBest > 0.f) {
+	    if (pSubBest(i) < NodeSubBest) continue;
+	  }
+	  keepNode[i] = 1;
+	}
+	
+	// ------------------------------
+	// 5) Build edge score lookup + adjacency among kept nodes
+	// ------------------------------
+	// Connectivity uses EdgeMin (looser). Pruning uses EdgeStrong (tighter).
+	const float EdgeMin      = 0.60f;  // "present" edge
+	const float EdgeStrong   = 0.80f;  // "strong" edge
+	
 	auto pack = [&](int a, int b) -> uint64_t {
 	  return (uint64_t(uint32_t(a)) << 32) | uint32_t(b);
 	};
 	struct U64Hash { size_t operator()(uint64_t x) const noexcept { return std::hash<uint64_t>{}(x); } };
 	
-	// ------------------------------
-	// (1) Node preselection mask
-	// ------------------------------
-	std::vector<char> keepNode(N, 0);
-	for (int i = 0; i < N; ++i) {
-	  keepNode[i] = isHF(i) ? 1 : 0;
-	}
-	
-	// If you want to allow non-HF nodes to remain attachable later, you can loosen this,
-	// but for "first apply node cuts", we hard mask here.
-	
-	// ------------------------------
-	// (2) Build fast edge score lookup (only among kept nodes, only edges above EdgeMin)
-	// ------------------------------
 	std::unordered_map<uint64_t, float, U64Hash> edgeScore;
 	edgeScore.reserve((size_t)E * 2);
+	
+	std::vector<std::vector<int>> adj(N);
 	
 	for (int e = 0; e < E; ++e) {
 	  int u = edgeSrc(e);
@@ -1122,36 +1191,26 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	  if (u < 0 || u >= N || v < 0 || v >= N) continue;
 	  if (!keepNode[u] || !keepNode[v]) continue;
 	
-	  float pe = edge_probs_flat[e];
-	  if (std::isnan(pe)) continue;
-	  if (pe < EdgeMin) continue;
+	  float pe = pEdge(e);
+	  if (std::isnan(pe) || pe < EdgeMin) continue;
 	
 	  edgeScore[pack(u,v)] = pe;
 	  edgeScore[pack(v,u)] = pe;
-	}
 	
-	// ------------------------------
-	// (3) Build adjacency on kept nodes using "present" edges (pe >= EdgeMin)
-	// ------------------------------
-	std::vector<std::vector<int>> adj(N);
-	for (auto const& kv : edgeScore) {
-	  uint64_t key = kv.first;
-	  int u = int(key >> 32);
-	  int v = int(uint32_t(key));
-	  // edgeScore has both directions; we'll push both; ok for DFS visited
 	  adj[u].push_back(v);
+	  adj[v].push_back(u);
 	}
 	
 	// Optional: de-duplicate adjacency lists
-	for (int u = 0; u < N; ++u) {
-	  auto& nb = adj[u];
-	  if (nb.empty()) continue;
-	  std::sort(nb.begin(), nb.end());
-	  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
-	}
+	//for (int u = 0; u < N; ++u) {
+	//  auto& nb = adj[u];
+	//  if (nb.empty()) continue;
+	//  std::sort(nb.begin(), nb.end());
+	//  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+	//}
 	
 	// ------------------------------
-	// (4) Connected components on the masked graph (kept nodes only)
+	// 6) Connected components on kept nodes
 	// ------------------------------
 	std::vector<int> visited(N, 0);
 	std::vector<std::vector<int>> comps;
@@ -1164,8 +1223,8 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	  if (!keepNode[start]) continue;
 	  if (visited[start]) continue;
 	  if (adj[start].empty()) continue; // ignore isolated kept nodes (change if you want singletons)
-	  visited[start] = 1;
 	
+	  visited[start] = 1;
 	  comps.emplace_back();
 	  auto& comp = comps.back();
 	
@@ -1188,18 +1247,16 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	}
 	
 	// ------------------------------
-	// (5) Prune each component to be "strongly internally supported"
-	//     (k-core-ish using strong edges + mean incident edge, iterated)
+	// 7) Iterative pruning inside each component (remove bridgey/weak nodes)
 	// ------------------------------
-	auto pruneComp = [&](std::vector<int>& comp) {
-	  if ((int)comp.size() < MinClusterSize) { comp.clear(); return; }
+	const int   MinClusterSize  = 3;    // you can try 3 once things are stable
+	const int   MinStrongNbrs   = 2;    // for small comps; try 2 for larger comps
+	const float MinMeanEdge     = 0.30f;
+	const int   MaxPruneIters   = 10;
 	
-	  std::unordered_set<int> in;
-	  in.reserve(comp.size() * 2);
-	
+	for (auto& comp : comps) {
 	  for (int iter = 0; iter < MaxPruneIters; ++iter) {
-	    in.clear();
-	    for (int u : comp) in.insert(u);
+	    if ((int)comp.size() < MinClusterSize) { comp.clear(); break; }
 	
 	    bool changed = false;
 	    std::vector<int> keep;
@@ -1210,64 +1267,176 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	      int present = 0;
 	      float sum = 0.f;
 	
+	      // Evaluate u vs others within the current comp
 	      for (int v : comp) {
 	        if (v == u) continue;
-	        auto it = edgeScore.find(pack(u,v));
+	        auto it = edgeScore.find(pack(u, v));
 	        if (it == edgeScore.end()) continue;
 	        float pe = it->second;
 	        present++;
 	        sum += pe;
-	        if (pe >= EdgeStrongCut) strong++;
+	        if (pe >= EdgeStrong) strong++;
 	      }
 	
 	      float mean = (present > 0) ? (sum / float(present)) : 0.f;
 	
-	      // Require that the node is not just "connected", but supported by multiple strong neighbors
-	      bool ok = true;
-	      ok &= (strong >= MinStrongNbrs);
-	      ok &= (mean >= MinMeanEdge);
+	      // Keep only nodes that are internally supported
+	      bool ok = (strong >= MinStrongNbrs) && (mean >= MinMeanEdge);
 	
 	      if (ok) keep.push_back(u);
 	      else changed = true;
 	    }
 	
 	    comp.swap(keep);
-	    if ((int)comp.size() < MinClusterSize) { comp.clear(); return; }
 	    if (!changed) break;
 	  }
-	};
-	
-	for (auto& comp : comps) {
-	  pruneComp(comp);
 	}
 	
-	// Drop empty / too small
+	// Drop empties / too small
 	comps.erase(std::remove_if(comps.begin(), comps.end(),
 	                           [&](auto const& c){ return (int)c.size() < MinClusterSize; }),
 	           comps.end());
+	
+	// ------------------------------
+	// 8) OPTIONAL: split each comp by sublabel if you want separate B/C/CfromB vertices
+	// Do this only if you see mixed comps; otherwise skip.
+	// ------------------------------
+	const bool SplitBySubLabel = false;
+	
+	if (SplitBySubLabel) {
+	  std::vector<std::vector<int>> comps2;
+	  comps2.reserve(comps.size());
+	
+	  for (auto const& comp : comps) {
+	    std::vector<int> g0, g1, g2;
+	    g0.reserve(comp.size()); g1.reserve(comp.size()); g2.reserve(comp.size());
+	
+	    for (int u : comp) {
+	      int a = subArgMax(u);
+	      if      (a == 0) g0.push_back(u);
+	      else if (a == 1) g1.push_back(u);
+	      else             g2.push_back(u);
+	    }
+	
+	    if ((int)g0.size() >= MinClusterSize) comps2.push_back(std::move(g0));
+	    if ((int)g1.size() >= MinClusterSize) comps2.push_back(std::move(g1));
+	    if ((int)g2.size() >= MinClusterSize) comps2.push_back(std::move(g2));
+	  }
+	
+	  comps.swap(comps2);
+	}
+
+	//IF mapping needed
+	auto toTrkIdx = [&](int idx) -> int {
+	  return (int)t_trks_SV_indices[idx]; // must exist and be size N
+	};
 
 
-	auto printCompDetails = [&](const std::vector<int>& comp, int compId) {
+
+
+//Writing model outputs to histograms after genmatching for sig/bkg
+//
+sv_score_sig.reserve(N);
+sv_score_bkg.reserve(N);
+edge_score_sig.reserve(E);
+edge_score_bkg.reserve(E);
+
+for (int node = 0; node < N; ++node) {
+    const int trk = toTrkIdx(node);
+    const bool is_sig = (truthByTrack.find(trk) != truthByTrack.end());
+
+    double score = static_cast<double>(softmax2_prob1(node));
+    score = std::clamp(score, 0.0, 1.0);
+
+    (is_sig ? sv_score_sig : sv_score_bkg).push_back(score);
+ }  
+
+for (int e = 0; e < E; ++e) {
+    const int u = edge_i[e];
+    const int v = edge_j[e];
+
+    const int tu = toTrkIdx(u);
+    const int tv = toTrkIdx(v);
+
+    bool is_sig_edge = false;
+    const auto itu = truthByTrack.find(tu);
+    const auto itv = truthByTrack.find(tv);
+    if (itu != truthByTrack.end() && itv != truthByTrack.end()) {
+      is_sig_edge = (itu->second.first == itv->second.first) &&
+                    (itu->second.second == itv->second.second);
+    }
+
+    double score = static_cast<double>(sigmoid(edge_logits_flat[e]));
+    score = std::clamp(score, 0.0, 1.0);
+
+    (is_sig_edge ? edge_score_sig : edge_score_bkg).push_back(score);
+  }
+
+// ============================================================================
+// Matching / printing with new model outputs:
+//   - truth label exists in [0..6]; you care about truth labels {2,3,4}
+//   - sub_logits argmax is in {0,1,2} and should correspond to truth {2,3,4}
+//     mapping: truth 2->sub 0, truth 3->sub 1, truth 4->sub 2
+//
+// "SV match" definition (per truth label 2/3/4 separately):
+//   A hadidx is matched for label L if there exists SOME component where
+//   >=2 tracks from that hadidx have truth label L AND predicted sublabel == map(L).
+//
+// "Fake" definition (per predicted sublabel s=0/1/2):
+//   In a component, if there are >=2 tracks with NO truth match (not in truthByTrack)
+//   and they share predicted sublabel s, count one fake vertex instance for s.
+// ============================================================================
+
+// ------------------------------
+// Helpers: predicted pSV and predicted sublabel
+// ------------------------------
+// truth label -> expected sublabel
+auto truthToSub = [&](int truthLab) -> int {
+  // You stated: truth 2,3,4 correspond to sub 0,1,2
+  if (truthLab == 2) return 0;
+  if (truthLab == 3) return 1;
+  if (truthLab == 4) return 2;
+  return -1;
+};
+
+// For printing: modelSV label as 0/1 (nonSV/SV) based on argmax over [2]
+auto modelSVLabel = [&](int idx) -> int {
+  float a = sv_logits_flat[idx*2 + 0];
+  float b = sv_logits_flat[idx*2 + 1];
+  return (b > a) ? 1 : 0; // 1 = SV
+};
+
+// ------------------------------
+// (A) Print comp details: trkidx modelSV modelSubSV truthlabel truthhadidx
+// ------------------------------
+std::unordered_set<int> matchedTruthTracks;
+matchedTruthTracks.reserve(1024);
+
+auto printCompDetails = [&](const std::vector<int>& comp, int compId) {
   std::cout << "===== Component " << compId << " size=" << comp.size() << " =====\n";
-  std::cout << "trkIdx  model  truthLabel  truthHadidx\n";
-  std::cout << "--------------------------------------\n";
+  std::cout << "trkIdx  modelSV  modelSubSV  truthLabel  truthHadidx\n";
+  std::cout << "----------------------------------------------------\n";
 
   for (int idx : comp) {
-    const int m = nodeArgMax(idx);
+    const int trk = toTrkIdx(idx);
+    const int mSV = modelSVLabel(idx);
+    const int mSu = subArgMax(idx)+2;
 
-    auto jt = truthByTrack.find(idx);
+    auto jt = truthByTrack.find(trk);
     if (jt != truthByTrack.end()) {
-      matchedTruthTracks.insert(idx); 
+      matchedTruthTracks.insert(trk);
       const int tLab = jt->second.first;
       const int tHid = jt->second.second;
 
-      std::cout << std::setw(5) << idx << "  "
-                << std::setw(5) << m   << "  "
+      std::cout << std::setw(5) << trk << "  "
+                << std::setw(7) << mSV << "  "
+                << std::setw(10) << mSu << "  "
                 << std::setw(10) << tLab << "  "
                 << std::setw(11) << tHid << "\n";
     } else {
-      std::cout << std::setw(5) << idx << "  "
-                << std::setw(5) << m   << "  "
+      std::cout << std::setw(5) << trk << "  "
+                << std::setw(7) << mSV << "  "
+                << std::setw(10) << mSu << "  "
                 << std::setw(10) << "NA" << "  "
                 << std::setw(11) << "NA" << "\n";
     }
@@ -1276,6 +1445,13 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   std::cout << "\n";
 };
 
+// Print comps
+int compId = 0;
+for (auto const& comp : comps) {
+  printCompDetails(comp, compId++);
+}
+
+// Unmatched truth tracks (same as your old helper; updated to use trk idx set)
 auto printUnmatchedTruth = [&]() {
   std::cout << "\n";
   std::cout << "==================== UNMATCHED GENMATCH TRACKS ====================\n";
@@ -1298,49 +1474,48 @@ auto printUnmatchedTruth = [&]() {
               << std::setw(11) << genmatch->hadidx[k] << "\n";
   }
 
-  if (nUnmatched == 0) {
-    std::cout << "(none)\n";
-  }
+  if (nUnmatched == 0) std::cout << "(none)\n";
   std::cout << "====================================================================\n\n";
 };
 
-
-int compId = 0;
-for (auto const& comp : comps) {
-  printCompDetails(comp, compId++);
-}
 printUnmatchedTruth();
-
-// 2) Denominator: all unique hadidx per label in the truth
-std::array<std::unordered_set<int>, C> totalHadidxByLabel;
-for (auto& s : totalHadidxByLabel) s.reserve(256);
+// ------------------------------
+// (B) Denominator: unique hadidx per truth label (2/3/4) in the truth
+// ------------------------------
+constexpr int C_TRUTH = 7; // truth labels 0..6
+std::array<std::unordered_set<int>, C_TRUTH> totalHadidxByTruthLabel;
+for (auto& s : totalHadidxByTruthLabel) s.reserve(256);
 
 if (genmatch) {
   for (size_t k = 0; k < genmatch->indices.size(); ++k) {
     const int lab = genmatch->labels[k];
     const int hid = genmatch->hadidx[k];
-
-    // only labels you care about (2/3/4) and real vertices
-    if ((lab == 2 || lab == 3 || lab == 4) && hid >= 0) {
-      totalHadidxByLabel[lab].insert(hid);
+    if (hid < 0) continue;
+    if (lab == 2 || lab == 3 || lab == 4) {
+      totalHadidxByTruthLabel[lab].insert(hid);
     }
   }
 }
 
-// 3) Numerator: unique hadidx per label that are "matched" by your comps
-// match definition: in SOME component, >=2 tracks from same hadidx (and same truth label)
-std::array<std::unordered_set<int>, C> matchedHadidxByLabel;
-for (auto& s : matchedHadidxByLabel) s.reserve(256);
+// ------------------------------
+// (C) Numerator: unique hadidx per truth label matched by your comps
+// Match definition: in SOME component, >=2 tracks from same hadidx AND truth label L,
+// AND predicted sublabel == truthToSub(L).
+// Optionally require modelSV=1 or pSV > cut.
+// ------------------------------
+const bool RequireModelSV = true;
+const float pSVcut = 0.10f;
+
+std::array<std::unordered_set<int>, C_TRUTH> matchedHadidxByTruthLabel;
+for (auto& s : matchedHadidxByTruthLabel) s.reserve(256);
 
 for (auto const& comp : comps) {
-  // per-comp counts of tracks per hadidx for each label
+  // per comp counts by hadidx for each label 2/3/4
   std::unordered_map<int,int> cnt2, cnt3, cnt4;
   cnt2.reserve(64); cnt3.reserve(64); cnt4.reserve(64);
 
   for (int idx : comp) {
-    // If comp indices are node indices, map them here:
-    // int trk = nodeToTrkIdx[idx];
-    int trk = idx;
+    const int trk = toTrkIdx(idx);
 
     auto it = truthByTrack.find(trk);
     if (it == truthByTrack.end()) continue;
@@ -1349,99 +1524,114 @@ for (auto const& comp : comps) {
     const int hid = it->second.second;
     if (hid < 0) continue;
 
-    const int predLab = nodeArgMax(idx);
+    if (!(lab == 2 || lab == 3 || lab == 4)) continue;
 
-    // NEW: require model label matches truth label
-    if (predLab != lab) continue;
+    // predicted requirements
+    if (RequireModelSV) {
+      if (softmax2_prob1(idx) <= pSVcut) continue;
+    }
+
+    const int predSub = subArgMax(idx);
+    const int wantSub = truthToSub(lab);
+    if (wantSub < 0) continue;
+
+    // require predicted sublabel corresponds to this truth label
+    if (predSub != wantSub) continue;
 
     if (lab == 2) ++cnt2[hid];
     else if (lab == 3) ++cnt3[hid];
-    else if (lab == 4) ++cnt4[hid];
+    else               ++cnt4[hid];
   }
 
-  // mark matched hadidx for this comp if >=2 tracks
-  for (auto const& [hid, n] : cnt2) if (n >= 2) matchedHadidxByLabel[2].insert(hid);
-  for (auto const& [hid, n] : cnt3) if (n >= 2) matchedHadidxByLabel[3].insert(hid);
-  for (auto const& [hid, n] : cnt4) if (n >= 2) matchedHadidxByLabel[4].insert(hid);
+  for (auto const& [hid, n] : cnt2) if (n >= 2) matchedHadidxByTruthLabel[2].insert(hid);
+  for (auto const& [hid, n] : cnt3) if (n >= 2) matchedHadidxByTruthLabel[3].insert(hid);
+  for (auto const& [hid, n] : cnt4) if (n >= 2) matchedHadidxByTruthLabel[4].insert(hid);
 }
 
-// 4) Print efficiency per label
+// ------------------------------
+// (D) Print efficiency per truth label
+// ------------------------------
 auto printEff = [&](int lab) {
-  const size_t denom = totalHadidxByLabel[lab].size();
-  const size_t num   = matchedHadidxByLabel[lab].size();
+  const size_t denom = totalHadidxByTruthLabel[lab].size();
+  const size_t num   = matchedHadidxByTruthLabel[lab].size();
   const float eff    = (denom == 0 ? 0.f : float(num) / float(denom));
- 
-  if(denom > 0){
-   std::cout << "label " << lab
-            << " hadidxMatched=" << num
-            << " hadidxTotal=" << denom
-            << " efficiency= " << std::fixed << std::setprecision(2) << eff
-            << "\n";
+
+  if (denom > 0) {
+    std::cout << "truth label " << lab
+              << " hadidxMatched=" << num
+              << " hadidxTotal=" << denom
+              << " efficiency=" << std::fixed << std::setprecision(3) << eff
+              << "\n";
   }
 };
 
-std::cout << "====================================================================\n\n";
-
-std::cout << "=== Vertex (hadidx) match efficiency: definition  ===\n";
+std::cout << "=== Vertex (hadidx) match efficiency using predicted sublabels ===\n";
 printEff(2);
 printEff(3);
 printEff(4);
 
-std::array<int, C> fakeVerticesByLabel{}; // init to 0
-std::array<int, C> fakeTracksByLabel{};   // init to 0
+// ------------------------------
+// (E) Fake vertices by predicted sublabel (same idea as before)
+// Definition: in a comp, if >=2 tracks with NO truth entry share the same predicted sublabel,
+// count a fake vertex instance for that sublabel. Optionally require SV-like.
+// ------------------------------
+std::array<int, 3> fakeVerticesByPredSub{}; // init 0
+std::array<int, 3> fakeTracksByPredSub{};   // init 0
 
 for (auto const& comp : comps) {
-
-  // For this component, count unmatched tracks by predicted label
-  std::array<int, C> unmatchedCountByPred{}; // per comp
+  std::array<int, 3> unmatchedCountBySub{}; // per comp
 
   for (int idx : comp) {
-    const int pred = nodeArgMax(idx);
-
-    // If comp indices are node indices, map to original track idx for truth lookup:
-    // int trk = nodeToTrkIdx[idx];
-    int trk = idx;
+    const int trk = toTrkIdx(idx);
 
     const bool hasTruth = (truthByTrack.find(trk) != truthByTrack.end());
-    if (!hasTruth) {
-      if (pred >= 0 && pred < C) unmatchedCountByPred[pred]++;
+    if (hasTruth) continue;
+
+    if (RequireModelSV) {
+      if (softmax2_prob1(idx) <= pSVcut) continue;
     }
+
+    const int sub = subArgMax(idx);
+    if (sub >= 0 && sub < 3) unmatchedCountBySub[sub]++;
   }
 
-  // A "fake vertex instance" for label L exists in this comp if >=2 unmatched tracks share pred label L
-  for (int L = 0; L < C; ++L) {
-    if (unmatchedCountByPred[L] >= 2) {
-      fakeVerticesByLabel[L] += 1;
-      fakeTracksByLabel[L]   += unmatchedCountByPred[L]; // how many unmatched tracks contributed
+  for (int s = 0; s < 3; ++s) {
+    if (unmatchedCountBySub[s] >= 2) {
+      fakeVerticesByPredSub[s] += 1;
+      fakeTracksByPredSub[s]   += unmatchedCountBySub[s];
     }
   }
 }
 
-// Print summary
-std::cout << "=== Fake vertices (unmatched tracks): definition = >=2 unmatched tracks with same label===\n";
-for (int L = 0; L < C; ++L) {
-  std::cout << "label " << L
-            << " fakeVertexInstances=" << fakeVerticesByLabel[L]
-            << " fakeTracksUsed=" << fakeTracksByLabel[L]
-            << "\n";
-}
+std::cout << "=== Fake vertices (unmatched tracks): >=2 unmatched tracks with same predicted sublabel ===\n";
+std::cout << "predSub 0 (truth2): fakeVertexInstances=" << fakeVerticesByPredSub[0]
+          << " fakeTracksUsed=" << fakeTracksByPredSub[0] << "\n";
+std::cout << "predSub 1 (truth3): fakeVertexInstances=" << fakeVerticesByPredSub[1]
+          << " fakeTracksUsed=" << fakeTracksByPredSub[1] << "\n";
+std::cout << "predSub 2 (truth4): fakeVertexInstances=" << fakeVerticesByPredSub[2]
+          << " fakeTracksUsed=" << fakeTracksByPredSub[2] << "\n";
+
+
+
+
+
+
+
+
+
 	
+		
 	
 	//Clustering
 	//
 
 	std::vector<TracksClusteringFromDisplacedSeed::Cluster> clusters;
 	clusters.reserve(comps.size());
-	std::vector<reco::TransientTrack> t_trks_SV_filtered;
-	std::unordered_set<int> used;
 	
 	
 	for (auto const& comp : comps) {
 	
 
-	   for (int i : comp) {
-   		 used.insert(i);
-  	   }
 	  // pick seed node = strongest node for that cls
 	  int seedIdx = comp[0];
 	
@@ -1452,7 +1642,7 @@ for (int L = 0; L < C; ++L) {
 	  aCl.tracks.clear();
 	  aCl.tracks.reserve(comp.size());
 	  for (int idx : comp) {
-	    aCl.tracks.push_back(t_trks_SV[idx]);
+	    aCl.tracks.push_back(t_trks_SV[toTrkIdx(idx)]);
 	  }
 	
 	  clusters.push_back(std::move(aCl));
@@ -1460,11 +1650,7 @@ for (int L = 0; L < C; ++L) {
 
    	 std::cout << "clusters size" << clusters.size() << std::endl;
 
-	t_trks_SV_filtered.reserve(used.size());
-
-	for (int i : used) {
-	  t_trks_SV_filtered.push_back(t_trks_SV[i]);
-	}
+	
 
 	
    	 // IVF default clustering
@@ -2006,6 +2192,11 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("SV_z_reco", &SV_z_reco);
     tree->Branch("SV_reco_nTracks", &SV_reco_nTracks);
     tree->Branch("SV_chi2_reco", &SV_chi2_reco);
+
+    tree->Branch("SV_score_sig", &sv_score_sig);
+    tree->Branch("SV_score_bkg", &sv_score_bkg);
+    tree->Branch("Edge_score_sig", &edge_score_sig);
+    tree->Branch("Edge_score_bkg", &edge_score_bkg);
 
     
 

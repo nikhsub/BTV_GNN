@@ -248,7 +248,11 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<float> SVrecoTrk_phi;
       std::vector<int> Hadron_SVRecoIdx;
       std::vector<float> Hadron_SVRecoDistance;
-	
+
+      std::vector<double> sv_score_sig;
+      std::vector<double> sv_score_bkg;
+      std::vector<double> edge_score_sig;
+      std::vector<double> edge_score_bkg;
 
      
 };
