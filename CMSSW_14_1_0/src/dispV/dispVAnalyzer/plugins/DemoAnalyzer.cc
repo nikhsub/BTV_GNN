@@ -621,6 +621,16 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   edge_score_sig.clear();
   edge_score_bkg.clear();
 
+  nHad_B.clear();
+  nHad_BtoC.clear();
+  nHad_C.clear();
+  eff_B.clear();
+  eff_BtoC.clear();
+  eff_C.clear();
+  fake_B.clear();
+  fake_BtoC.clear();
+  fake_C.clear();
+
 
   Handle<PackedCandidateCollection> patcan;
   Handle<PackedCandidateCollection> losttracks;
@@ -1090,6 +1100,26 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	assert((int)sv_sub_logits_flat.size() == N * C_SUB);
 	assert((int)edge_logits_flat.size()   == E);
 	assert((int)edge_index_flat_f.size()  == 2 * E);
+
+	// ------------------------------
+	// Tunables (scan these)
+	// ------------------------------
+	const float SeedSVcut     = 0.40f;   // seeds must be SV-like
+	const float NodeSVmin     = 0.20f;   // allow low pSV nodes ONLY during expansion (not for seeding)
+	const float EdgeMin       = 0.50f;   // used only for bookkeeping / optional weak attach (keep as you had)
+	const float EdgeStrongCC  = 0.80f;   // STRONG edges for connectivity (CC), scan 0.85..0.95
+	const float EdgeStrongAtt = 0.75f;   // STRONG edges for attachment into an existing comp
+	const int   MinClusterSize = 2;
+	
+	// Expansion rule: node joins comp if it has >=AttachMinStrong strong edges into that comp,
+	// OR mean strong-edge score into comp >= AttachMinMean.
+	const int   AttachMinStrong = 2;     // try 1 or 2
+	const float AttachMinMean   = 0.80f; // try 0.85..0.92
+	
+	// Optional mutual topK pruning on strong edges (recommended; kills bridges)
+	const bool  UseMutualTopK = true;
+	const int   TopK = 4;               // keep topK strong neighbors per node (mutual only), try 3..8
+
 	
 	// ------------------------------
 	// 2) Math helpers
@@ -1131,10 +1161,10 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	
 	auto pSV = [&](int i) -> float { return softmax2_prob1(i); };
 	
-	auto pSubBest = [&](int i) -> float {
-	  float p[3]; softmax3(i, p);
-	  return std::max({p[0], p[1], p[2]});
-	};
+	//auto pSubBest = [&](int i) -> float {
+	//  float p[3]; softmax3(i, p);
+	//  return std::max({p[0], p[1], p[2]});
+	//};
 	
 	auto subArgMax = [&](int i) -> int {
 	  float p[3]; softmax3(i, p);
@@ -1145,36 +1175,32 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	};
 	
 	// ------------------------------
-	// 3) Edge index accessors (your layout is correct)
+	// 3) Edge index accessors
 	// ------------------------------
 	auto edgeSrc = [&](int e) -> int { return (int)edge_index_flat_f[e]; };
 	auto edgeDst = [&](int e) -> int { return (int)edge_index_flat_f[E + e]; };
 	auto pEdge   = [&](int e) -> float { return sigmoid(edge_logits_flat[e]); };
-	
+
 	// ------------------------------
-	// 4) Node preselection (SV-like)
+	// Step 4 (REPLACED): Seed selection
+	//   - Only nodes with pSV > SeedSVcut can START a cluster.
+	//   - Nodes with pSV > NodeSVmin are eligible to be ATTACHED later.
 	// ------------------------------
-	// Start loose and tighten later.
-	const float NodeSVcut    = 0.10f;  // keep nodes with pSV > this
-	const float NodeSubBest  = 0.20f;  // optional, start 0.0 then try 0.3-0.5 later
+	std::vector<char> isSeed(N, 0);
+	std::vector<char> isEligible(N, 0);
 	
-	std::vector<char> keepNode(N, 0);
 	for (int i = 0; i < N; ++i) {
-	  float p = pSV(i);
-	  if (p <= NodeSVcut) continue;
-	  if (NodeSubBest > 0.f) {
-	    if (pSubBest(i) < NodeSubBest) continue;
-	  }
-	  keepNode[i] = 1;
+	  float ps = pSV(i);
+	  if (ps >= SeedSVcut) isSeed[i] = 1;
+	  if (ps >= NodeSVmin) isEligible[i] = 1;
 	}
 	
 	// ------------------------------
-	// 5) Build edge score lookup + adjacency among kept nodes
+	// Step 5 (MODIFIED): Build STRONG adjacency only, plus (optional) weak list
+	//   - adjStrongRaw holds edges with pe >= EdgeStrongCC
 	// ------------------------------
-	// Connectivity uses EdgeMin (looser). Pruning uses EdgeStrong (tighter).
-	const float EdgeMin      = 0.60f;  // "present" edge
-	const float EdgeStrong   = 0.80f;  // "strong" edge
-	
+	std::vector<std::vector<int>> adjStrongRaw(N);	
+
 	auto pack = [&](int a, int b) -> uint64_t {
 	  return (uint64_t(uint32_t(a)) << 32) | uint32_t(b);
 	};
@@ -1183,50 +1209,106 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	std::unordered_map<uint64_t, float, U64Hash> edgeScore;
 	edgeScore.reserve((size_t)E * 2);
 	
-	std::vector<std::vector<int>> adj(N);
-	
 	for (int e = 0; e < E; ++e) {
 	  int u = edgeSrc(e);
 	  int v = edgeDst(e);
-	  if (u < 0 || u >= N || v < 0 || v >= N) continue;
-	  if (!keepNode[u] || !keepNode[v]) continue;
+	  if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
+	  if (!isEligible[u] || !isEligible[v]) continue;
 	
 	  float pe = pEdge(e);
-	  if (std::isnan(pe) || pe < EdgeMin) continue;
+	  if (!std::isfinite(pe)) continue;
+	  if (pe < EdgeMin) continue;
 	
+	  // store score both directions
 	  edgeScore[pack(u,v)] = pe;
 	  edgeScore[pack(v,u)] = pe;
 	
-	  adj[u].push_back(v);
-	  adj[v].push_back(u);
+	  if (pe >= EdgeStrongCC) {
+	    adjStrongRaw[u].push_back(v);
+	    adjStrongRaw[v].push_back(u);
+	  } 
+	}	
+
+	// ------------------------------
+	// Optional: Mutual topK pruning on STRONG edges
+	//   - For each node u, keep only topK neighbors by pe among strong edges
+	//   - Then keep edge (u,v) only if u keeps v AND v keeps u
+	// ------------------------------
+
+	std::vector<std::vector<int>> adjStrong(N);
+
+	if (UseMutualTopK) {
+	  // top list per node
+	  std::vector<std::vector<int>> topNbrs(N);
+	  topNbrs.reserve(N);
+	
+	  for (int u = 0; u < N; ++u) {
+	    auto &nb = adjStrongRaw[u];
+	    if (nb.empty()) continue;
+	
+	    // sort neighbors by edge score descending
+	    std::sort(nb.begin(), nb.end(), [&](int a, int b){
+	      float sa = 0.f, sb = 0.f;
+	      auto ita = edgeScore.find(pack(u,a)); if (ita != edgeScore.end()) sa = ita->second;
+	      auto itb = edgeScore.find(pack(u,b)); if (itb != edgeScore.end()) sb = itb->second;
+	      return sa > sb;
+	    });
+	
+	    if ((int)nb.size() > TopK) nb.resize(TopK);
+	    topNbrs[u] = nb;
+	  }
+	
+	  // membership test: store kept neighbors in a hash set per node (packed key)
+	  std::unordered_set<uint64_t, U64Hash> keepEdge;
+	  keepEdge.reserve((size_t)N * (size_t)TopK * 2);
+	
+	  for (int u = 0; u < N; ++u) {
+	    for (int v : topNbrs[u]) {
+	      keepEdge.insert(pack(u,v));
+	    }
+	  }
+	
+	  // mutualize
+	  for (int u = 0; u < N; ++u) {
+	    for (int v : topNbrs[u]) {
+	      if (keepEdge.find(pack(v,u)) == keepEdge.end()) continue;
+	      adjStrong[u].push_back(v);
+	    }
+	  }
+	} else {
+	  adjStrong.swap(adjStrongRaw);
 	}
 	
-	// Optional: de-duplicate adjacency lists
-	//for (int u = 0; u < N; ++u) {
-	//  auto& nb = adj[u];
-	//  if (nb.empty()) continue;
-	//  std::sort(nb.begin(), nb.end());
-	//  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
-	//}
+	// Optional: de-duplicate adjStrong
+	for (int u = 0; u < N; ++u) {
+	  auto &nb = adjStrong[u];
+	  if (nb.empty()) continue;
+	  std::sort(nb.begin(), nb.end());
+	  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+	}
+
 	
 	// ------------------------------
-	// 6) Connected components on kept nodes
+	// Step 6 (REPLACED): Connected components on STRONG edges seeded by SV-like nodes
+	//   - We do BFS/DFS starting ONLY from seeds
+	//   - Component grows ONLY through adjStrong (EdgeStrongCC, possibly pruned by TopK)
 	// ------------------------------
-	std::vector<int> visited(N, 0);
+	std::vector<char> visited(N, 0);
 	std::vector<std::vector<int>> comps;
 	comps.reserve(N);
 	
 	std::vector<int> stack;
-	stack.reserve(N);
+	stack.reserve(512);
 	
 	for (int start = 0; start < N; ++start) {
-	  if (!keepNode[start]) continue;
+	  if (!isSeed[start]) continue;
 	  if (visited[start]) continue;
-	  if (adj[start].empty()) continue; // ignore isolated kept nodes (change if you want singletons)
+	  if (adjStrong[start].empty()) continue;
 	
 	  visited[start] = 1;
 	  comps.emplace_back();
-	  auto& comp = comps.back();
+	  auto &comp = comps.back();
+	  comp.reserve(64);
 	
 	  stack.clear();
 	  stack.push_back(start);
@@ -1236,95 +1318,191 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	    stack.pop_back();
 	    comp.push_back(u);
 	
-	    for (int v : adj[u]) {
-	      if (!keepNode[v]) continue;
-	      if (!visited[v]) {
-	        visited[v] = 1;
-	        stack.push_back(v);
-	      }
+	    for (int v : adjStrong[u]) {
+	      if (!isEligible[v]) continue;
+	      if (visited[v]) continue;
+	      // Only traverse if v is eligible AND connected by strong edges
+	      visited[v] = 1;
+	      stack.push_back(v);
 	    }
 	  }
 	}
-	
+
 	// ------------------------------
-	// 7) Iterative pruning inside each component (remove bridgey/weak nodes)
+	// Step 6b (NEW): Expand each strong component by attaching eligible nodes
+	//   - A node can be attached if it has strong attachment into the component
+	//   - This recovers low-pSV true tracks WITHOUT letting them bridge components.
+	//   - IMPORTANT: We never merge two components during expansion.
 	// ------------------------------
-	const int   MinClusterSize  = 3;    // you can try 3 once things are stable
-	const int   MinStrongNbrs   = 2;    // for small comps; try 2 for larger comps
-	const float MinMeanEdge     = 0.30f;
-	const int   MaxPruneIters   = 10;
+	std::vector<int> compId(N, -1);
+	for (int ci = 0; ci < (int)comps.size(); ++ci) {
+	  for (int u : comps[ci]) compId[u] = ci;
+	}
 	
-	for (auto& comp : comps) {
-	  for (int iter = 0; iter < MaxPruneIters; ++iter) {
-	    if ((int)comp.size() < MinClusterSize) { comp.clear(); break; }
+	// Build a per-node list of strong neighbors for attachment using a looser threshold EdgeStrongAtt.
+	// We’ll just query edgeScore for neighbors already in adjStrongRaw/adjStrong.
+	// If you want: build adjAttach from all edges with pe >= EdgeStrongAtt.
+	// Here we reuse edgeScore + adjStrongRaw adjacency to limit work.
+	std::vector<std::vector<int>> adjAttach(N);
+		
+	for (int e = 0; e < E; ++e) {
+	  int u = edgeSrc(e);
+	  int v = edgeDst(e);
+	  if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
+	  if (!isEligible[u] || !isEligible[v]) continue;
 	
-	    bool changed = false;
-	    std::vector<int> keep;
-	    keep.reserve(comp.size());
+	  float pe = pEdge(e);
+	  if (!std::isfinite(pe)) continue;
+	  if (pe < EdgeStrongAtt) continue;
+	
+	  adjAttach[u].push_back(v);
+	  adjAttach[v].push_back(u);
+	}
+	for (int u = 0; u < N; ++u) {
+	  auto &nb = adjAttach[u];
+	  if (nb.empty()) continue;
+	  std::sort(nb.begin(), nb.end());
+	  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+	}
+
+	for (int ci = 0; ci < (int)comps.size(); ++ci) {
+    	  auto &comp = comps[ci];
+	
+	  if ((int)comp.size() < MinClusterSize) continue;
+	
+	  // mark members for fast membership test
+	  // (use a stamp array to avoid clearing O(N))
+	  static std::vector<int> mark;
+	  static int stamp = 1;
+	  if ((int)mark.size() != N) mark.assign(N, 0);
+	  ++stamp;
+	  for (int u : comp) mark[u] = stamp;
+	
+	  bool changed = true;
+	  int iter = 0;
+	  const int MaxExpandIters = 6;
+	
+	  while (changed && iter++ < MaxExpandIters) {
+	    changed = false;
+	
+	    // Candidate pool: neighbors of current comp via attach edges
+	    std::vector<int> candidates;
+	    candidates.reserve(comp.size() * 4);
 	
 	    for (int u : comp) {
-	      int strong = 0;
-	      int present = 0;
-	      float sum = 0.f;
+	      for (int v : adjAttach[u]) {
+	        if (!isEligible[v]) continue;
+	        if (mark[v] == stamp) continue;
+	        candidates.push_back(v);
+	      }
+	    }
 	
-	      // Evaluate u vs others within the current comp
-	      for (int v : comp) {
-	        if (v == u) continue;
-	        auto it = edgeScore.find(pack(u, v));
+	    if (candidates.empty()) break;
+	    std::sort(candidates.begin(), candidates.end());
+	    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+	
+	    // Test candidates against comp
+	    for (int v : candidates) {
+	      int strongCnt = 0;
+	      float sum = 0.f;
+	      int cnt = 0;
+	
+	      // Count attach edges into comp by scanning v’s attach neighbors
+	      for (int nb : adjAttach[v]) {
+	        if (mark[nb] != stamp) continue;
+	        auto it = edgeScore.find(pack(v, nb));
 	        if (it == edgeScore.end()) continue;
 	        float pe = it->second;
-	        present++;
+	        // pe >= EdgeStrongAtt by construction, but keep the check if you change builders
+	        if (pe < EdgeStrongAtt) continue;
+	        strongCnt++;
 	        sum += pe;
-	        if (pe >= EdgeStrong) strong++;
+	        cnt++;
 	      }
 	
-	      float mean = (present > 0) ? (sum / float(present)) : 0.f;
+	      float mean = (cnt > 0) ? (sum / float(cnt)) : 0.f;
+
+	      if (strongCnt >= AttachMinStrong || mean >= AttachMinMean) {
+		  int old = compId[v];
+		
+		  // If v already belongs to another comp, remove it from there
+		  if (old >= 0) {
+		    auto &oldComp = comps[old];
+		    oldComp.erase(
+		      std::remove(oldComp.begin(), oldComp.end(), v),
+		      oldComp.end()
+		    );
+		  }
+		
+		  comp.push_back(v);
+		  mark[v] = stamp;
+		  compId[v] = ci;   // assign directly to THIS comp
+		  changed = true;
+		}
 	
-	      // Keep only nodes that are internally supported
-	      bool ok = (strong >= MinStrongNbrs) && (mean >= MinMeanEdge);
-	
-	      if (ok) keep.push_back(u);
-	      else changed = true;
+	      
 	    }
 	
-	    comp.swap(keep);
-	    if (!changed) break;
 	  }
 	}
 	
-	// Drop empties / too small
-	comps.erase(std::remove_if(comps.begin(), comps.end(),
-	                           [&](auto const& c){ return (int)c.size() < MinClusterSize; }),
-	           comps.end());
-	
+
 	// ------------------------------
-	// 8) OPTIONAL: split each comp by sublabel if you want separate B/C/CfromB vertices
-	// Do this only if you see mixed comps; otherwise skip.
+	// Step 7 (SIMPLIFIED): Final cleanup (size cut) + optional SV-core requirement
+	//   - Require at least one strong SV-ish node inside component (prevents junk comps)
 	// ------------------------------
-	const bool SplitBySubLabel = false;
-	
-	if (SplitBySubLabel) {
-	  std::vector<std::vector<int>> comps2;
-	  comps2.reserve(comps.size());
-	
-	  for (auto const& comp : comps) {
-	    std::vector<int> g0, g1, g2;
-	    g0.reserve(comp.size()); g1.reserve(comp.size()); g2.reserve(comp.size());
-	
-	    for (int u : comp) {
-	      int a = subArgMax(u);
-	      if      (a == 0) g0.push_back(u);
-	      else if (a == 1) g1.push_back(u);
-	      else             g2.push_back(u);
-	    }
-	
-	    if ((int)g0.size() >= MinClusterSize) comps2.push_back(std::move(g0));
-	    if ((int)g1.size() >= MinClusterSize) comps2.push_back(std::move(g1));
-	    if ((int)g2.size() >= MinClusterSize) comps2.push_back(std::move(g2));
+	auto hasSVcore = [&](const std::vector<int> &comp) -> bool {
+	  float maxPSV = 0.f;
+	  int cnt30 = 0;
+	  for (int u : comp) {
+	    float ps = pSV(u);
+	    if (ps > maxPSV) maxPSV = ps;
+	    if (ps > 0.30f) cnt30++;
 	  }
+	  float frac30 = comp.empty() ? 0.f : float(cnt30) / float(comp.size());
+	  return (maxPSV > 0.70f) && (frac30 > 0.40f);
+	};
 	
-	  comps.swap(comps2);
-	}
+	comps.erase(
+	  std::remove_if(comps.begin(), comps.end(), [&](auto const& c){
+	    if ((int)c.size() < MinClusterSize) return true;
+	    if (!hasSVcore(c)) return true;
+	    return false;
+	  }),
+	  comps.end()
+	);
+	
+	
+	
+	
+	//// ------------------------------
+	//// 8) OPTIONAL: split each comp by sublabel if you want separate B/C/CfromB vertices
+	//// Do this only if you see mixed comps; otherwise skip.
+	//// ------------------------------
+	//const bool SplitBySubLabel = false;
+	//
+	//if (SplitBySubLabel) {
+	//  std::vector<std::vector<int>> comps2;
+	//  comps2.reserve(comps.size());
+	//
+	//  for (auto const& comp : comps) {
+	//    std::vector<int> g0, g1, g2;
+	//    g0.reserve(comp.size()); g1.reserve(comp.size()); g2.reserve(comp.size());
+	//
+	//    for (int u : comp) {
+	//      int a = subArgMax(u);
+	//      if      (a == 0) g0.push_back(u);
+	//      else if (a == 1) g1.push_back(u);
+	//      else             g2.push_back(u);
+	//    }
+	//
+	//    if ((int)g0.size() >= MinClusterSize) comps2.push_back(std::move(g0));
+	//    if ((int)g1.size() >= MinClusterSize) comps2.push_back(std::move(g1));
+	//    if ((int)g2.size() >= MinClusterSize) comps2.push_back(std::move(g2));
+	//  }
+	//
+	//  comps.swap(comps2);
+	//}
 
 	//IF mapping needed
 	auto toTrkIdx = [&](int idx) -> int {
@@ -1412,8 +1590,8 @@ auto modelSVLabel = [&](int idx) -> int {
 std::unordered_set<int> matchedTruthTracks;
 matchedTruthTracks.reserve(1024);
 
-auto printCompDetails = [&](const std::vector<int>& comp, int compId) {
-  std::cout << "===== Component " << compId << " size=" << comp.size() << " =====\n";
+auto printCompDetails = [&](const std::vector<int>& comp, int compnum) {
+  std::cout << "===== Component " << compnum << " size=" << comp.size() << " =====\n";
   std::cout << "trkIdx  modelSV  modelSubSV  truthLabel  truthHadidx\n";
   std::cout << "----------------------------------------------------\n";
 
@@ -1446,9 +1624,9 @@ auto printCompDetails = [&](const std::vector<int>& comp, int compId) {
 };
 
 // Print comps
-int compId = 0;
+int compnum = 0;
 for (auto const& comp : comps) {
-  printCompDetails(comp, compId++);
+  printCompDetails(comp, compnum++);
 }
 
 // Unmatched truth tracks (same as your old helper; updated to use trk idx set)
@@ -1556,6 +1734,24 @@ auto printEff = [&](int lab) {
   const size_t num   = matchedHadidxByTruthLabel[lab].size();
   const float eff    = (denom == 0 ? 0.f : float(num) / float(denom));
 
+  if(lab==2)
+  {
+	nHad_B.push_back((int)denom);
+	eff_B.push_back(eff);
+  }
+
+  if(lab==3)
+  {
+        nHad_BtoC.push_back((int)denom);
+        eff_BtoC.push_back(eff);
+  }
+ 
+  if(lab==4)
+  {
+        nHad_C.push_back((int)denom);
+        eff_C.push_back(eff);
+  }
+
   if (denom > 0) {
     std::cout << "truth label " << lab
               << " hadidxMatched=" << num
@@ -1611,15 +1807,11 @@ std::cout << "predSub 1 (truth3): fakeVertexInstances=" << fakeVerticesByPredSub
 std::cout << "predSub 2 (truth4): fakeVertexInstances=" << fakeVerticesByPredSub[2]
           << " fakeTracksUsed=" << fakeTracksByPredSub[2] << "\n";
 
+fake_B.push_back(fakeVerticesByPredSub[0]);
+fake_BtoC.push_back(fakeVerticesByPredSub[1]);
+fake_C.push_back(fakeVerticesByPredSub[2]);
 
 
-
-
-
-
-
-
-	
 		
 	
 	//Clustering
@@ -2198,6 +2390,15 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("Edge_score_sig", &edge_score_sig);
     tree->Branch("Edge_score_bkg", &edge_score_bkg);
 
+    tree->Branch("nHad_B", &nHad_B);
+    tree->Branch("nHad_BtoC", &nHad_BtoC);
+    tree->Branch("nHad_C", &nHad_C);
+    tree->Branch("eff_B", &eff_B);
+    tree->Branch("eff_BtoC", &eff_BtoC);
+    tree->Branch("eff_C", &eff_C);
+    tree->Branch("fake_B", &fake_B);
+    tree->Branch("fake_BtoC", &fake_BtoC);
+    tree->Branch("fake_C", &fake_C);
     
 
 	auto strip_chars = [&](std::string& s, const std::string& chars) {

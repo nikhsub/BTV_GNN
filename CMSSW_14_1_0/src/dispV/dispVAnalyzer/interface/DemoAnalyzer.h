@@ -254,6 +254,17 @@ class DemoAnalyzer : public edm::stream::EDAnalyzer<edm::GlobalCache<ONNXRuntime
       std::vector<double> edge_score_sig;
       std::vector<double> edge_score_bkg;
 
+      std::vector<int> nHad_B;
+      std::vector<int> nHad_BtoC;
+      std::vector<int> nHad_C;
+      std::vector<float> eff_B;
+      std::vector<float> eff_BtoC;
+      std::vector<float> eff_C;
+      std::vector<int> fake_B;
+      std::vector<int> fake_BtoC;
+      std::vector<int> fake_C;
+
+
      
 };
 
