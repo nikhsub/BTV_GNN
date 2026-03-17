@@ -1,11 +1,11 @@
 #!/bin/bash
 
-SRC_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/btv"
+SRC_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/hplusc"
 
 # Remote (OSCAR) info
 DEST_USER="nvenkat4"
 DEST_HOST="ssh.ccv.brown.edu"
-DEST_DIR="/users/nvenkat4/scratch/btv_trainfiles/ttbarhad_fullconn_1301/excess"
+DEST_DIR="/users/nvenkat4/scratch/hplusc_trainfiles"
 
 # Create destination directory on OSCAR (first SSH hop; will prompt Duo once)
 #ssh ${DEST_USER}@${DEST_HOST} "mkdir -p ${DEST_DIR}"

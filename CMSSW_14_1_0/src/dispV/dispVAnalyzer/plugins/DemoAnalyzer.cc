@@ -789,7 +789,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             float phi2 = alltracks[j].phi();
             float delta_r_val = reco::deltaR(eta1, phi1, eta2, phi2);
     
-            if (delta_r_val > 1) continue;
+            if (delta_r_val < 2e-4 or delta_r_val > 1) continue;
 	
 	    const float PION_MASS = 0.13957018; // GeV (charged pion mass)
         
@@ -856,7 +856,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
             	pairMomentumMag = pairMomentum.mag();
 	     }
 
-	     if (dca_val > 1 or dcaSig_val > 100 or cptopv_val > 20 or pvToPCAseed_val > 20 or pvToPCAtrack_val > 20) continue;	
+	     if (dca_val < 1e-8 or dca_val > 1 or dcaSig_val > 100 or cptopv_val < 4e-4 or cptopv_val > 20 or pvToPCAseed_val > 20 or pvToPCAtrack_val > 20) continue;	
 	     if (pairMomentumMag < 0.05 or pairMomentumMag > 100) continue;
     
             #pragma omp critical
@@ -1071,7 +1071,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
 	// ============================================================================
 	// Vertexing from new model outputs:
-	//   sv_logits_flat      : [N,2]   (binary logits: [bkg, SV])
+	//   sv_logits_flat      : [N,3]   (node logits: [nonSV, PV, SV])
 	//   sv_sub_logits_flat  : [N,3]   (subclass logits among SV-like: [B, C, CfromB])
 	//   edge_logits_flat    : [E]     (edge logits; apply sigmoid)
 	//
@@ -1086,7 +1086,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	// ------------------------------
 	// 1) Sizes / constants
 	// ------------------------------
-	constexpr int C_BIN  = 2; // sv logits per node
+	constexpr int C_NODE = 3; // node logits per track: [nonSV, PV, SV]
 	constexpr int C_SUB  = 3; // subclass logits per node (B/C/CfromB)
 	
 	int N = (int)t_trks_SV.size();
@@ -1096,7 +1096,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	int E = (int)edge_i.size();
 	
 	// Sanity checks against model outputs
-	assert((int)sv_logits_flat.size()     == N * C_BIN);
+	assert((int)sv_logits_flat.size()     == N * C_NODE);
 	assert((int)sv_sub_logits_flat.size() == N * C_SUB);
 	assert((int)edge_logits_flat.size()   == E);
 	assert((int)edge_index_flat_f.size()  == 2 * E);
@@ -1104,11 +1104,12 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	// ------------------------------
 	// Tunables (scan these)
 	// ------------------------------
-	const float SeedSVcut     = 0.40f;   // seeds must be SV-like
-	const float NodeSVmin     = 0.20f;   // allow low pSV nodes ONLY during expansion (not for seeding)
-	const float EdgeMin       = 0.50f;   // used only for bookkeeping / optional weak attach (keep as you had)
-	const float EdgeStrongCC  = 0.80f;   // STRONG edges for connectivity (CC), scan 0.85..0.95
-	const float EdgeStrongAtt = 0.75f;   // STRONG edges for attachment into an existing comp
+	const float SeedSVcut     = 0.20f;   // seeds must be SV-like
+	const float NodeSVmin     = 0.10f;   // allow low pSV nodes ONLY during expansion (not for seeding)
+	const float PVVetoCut     = 0.50f;   // reject tracks with large PV probability from SV flow
+	const float EdgeMin       = 0.10f;   // used only for bookkeeping / optional weak attach (keep as you had)
+	const float EdgeStrongCC  = 0.20f;   // STRONG edges for connectivity (CC), scan 0.85..0.95
+	const float EdgeStrongAtt = 0.30f;   // STRONG edges for attachment into an existing comp
 	const int   MinClusterSize = 2;
 	
 	// Expansion rule: node joins comp if it has >=AttachMinStrong strong edges into that comp,
@@ -1118,7 +1119,7 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	
 	// Optional mutual topK pruning on strong edges (recommended; kills bridges)
 	const bool  UseMutualTopK = true;
-	const int   TopK = 4;               // keep topK strong neighbors per node (mutual only), try 3..8
+	const int   TopK = 5;               // keep topK strong neighbors per node (mutual only), try 3..8
 
 	
 	// ------------------------------
@@ -1135,18 +1136,20 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	  }
 	};
 	
-	auto softmax2_prob1 = [&](int i) -> float {
-	  // sv_logits_flat layout: [N,2] with stride 2
-	  // take p(class=1) as SV probability
-	  float a = sv_logits_flat[i*2 + 0];
-	  float b = sv_logits_flat[i*2 + 1];
-	  float m = (a > b) ? a : b;
+	auto softmaxNode3 = [&](int i, float out[3]) {
+	  // sv_logits_flat layout: [N,3] = [nonSV, PV, SV]
+	  float a = sv_logits_flat[i*3 + 0];
+	  float b = sv_logits_flat[i*3 + 1];
+	  float c = sv_logits_flat[i*3 + 2];
+	  float m = std::max(a, std::max(b, c));
 	  float ea = std::exp(a - m);
 	  float eb = std::exp(b - m);
-	  return eb / (ea + eb);
+	  float ec = std::exp(c - m);
+	  float s  = ea + eb + ec;
+	  out[0] = ea/s; out[1] = eb/s; out[2] = ec/s;
 	};
 	
-	auto softmax3 = [&](int i, float out[3]) {
+	auto softmaxSub3 = [&](int i, float out[3]) {
 	  // sv_sub_logits_flat layout: [N,3]
 	  float a = sv_sub_logits_flat[i*3 + 0];
 	  float b = sv_sub_logits_flat[i*3 + 1];
@@ -1159,15 +1162,27 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	  out[0] = ea/s; out[1] = eb/s; out[2] = ec/s;
 	};
 	
-	auto pSV = [&](int i) -> float { return softmax2_prob1(i); };
+	auto pSV = [&](int i) -> float {
+	  float p[3]; softmaxNode3(i, p);
+	  return p[2]; // class 2 is SV
+	};
+
+	auto pPV = [&](int i) -> float {
+	  float p[3]; softmaxNode3(i, p);
+	  return p[1]; // class 1 is PV
+	};
+
+	auto passSVGate = [&](int i, float svCut) -> bool {
+	  return (pSV(i) > svCut) && (pPV(i) < PVVetoCut);
+	};
 	
 	//auto pSubBest = [&](int i) -> float {
-	//  float p[3]; softmax3(i, p);
+	//  float p[3]; softmaxSub3(i, p);
 	//  return std::max({p[0], p[1], p[2]});
 	//};
 	
 	auto subArgMax = [&](int i) -> int {
-	  float p[3]; softmax3(i, p);
+	  float p[3]; softmaxSub3(i, p);
 	  int a = 0;
 	  if (p[1] > p[a]) a = 1;
 	  if (p[2] > p[a]) a = 2;
@@ -1183,16 +1198,15 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
 	// ------------------------------
 	// Step 4 (REPLACED): Seed selection
-	//   - Only nodes with pSV > SeedSVcut can START a cluster.
-	//   - Nodes with pSV > NodeSVmin are eligible to be ATTACHED later.
+	//   - Only nodes with high SV probability and low PV probability can START a cluster.
+	//   - Nodes with lower SV probability can be ATTACHED later, but still pass PV veto.
 	// ------------------------------
 	std::vector<char> isSeed(N, 0);
 	std::vector<char> isEligible(N, 0);
 	
 	for (int i = 0; i < N; ++i) {
-	  float ps = pSV(i);
-	  if (ps >= SeedSVcut) isSeed[i] = 1;
-	  if (ps >= NodeSVmin) isEligible[i] = 1;
+	  if (passSVGate(i, SeedSVcut)) isSeed[i] = 1;
+	  if (passSVGate(i, NodeSVmin)) isEligible[i] = 1;
 	}
 	
 	// ------------------------------
@@ -1523,7 +1537,7 @@ for (int node = 0; node < N; ++node) {
     const int trk = toTrkIdx(node);
     const bool is_sig = (truthByTrack.find(trk) != truthByTrack.end());
 
-    double score = static_cast<double>(softmax2_prob1(node));
+    double score = static_cast<double>(pSV(node));
     score = std::clamp(score, 0.0, 1.0);
 
     (is_sig ? sv_score_sig : sv_score_bkg).push_back(score);
@@ -1577,11 +1591,13 @@ auto truthToSub = [&](int truthLab) -> int {
   return -1;
 };
 
-// For printing: modelSV label as 0/1 (nonSV/SV) based on argmax over [2]
-auto modelSVLabel = [&](int idx) -> int {
-  float a = sv_logits_flat[idx*2 + 0];
-  float b = sv_logits_flat[idx*2 + 1];
-  return (b > a) ? 1 : 0; // 1 = SV
+// For printing: predicted node class as argmax over [nonSV, PV, SV]
+auto modelNodeClass = [&](int idx) -> int {
+  float p[3]; softmaxNode3(idx, p);
+  int a = 0;
+  if (p[1] > p[a]) a = 1;
+  if (p[2] > p[a]) a = 2;
+  return a; // 0=nonSV, 1=PV, 2=SV
 };
 
 // ------------------------------
@@ -1592,12 +1608,14 @@ matchedTruthTracks.reserve(1024);
 
 auto printCompDetails = [&](const std::vector<int>& comp, int compnum) {
   std::cout << "===== Component " << compnum << " size=" << comp.size() << " =====\n";
-  std::cout << "trkIdx  modelSV  modelSubSV  truthLabel  truthHadidx\n";
-  std::cout << "----------------------------------------------------\n";
+  std::cout << "trkIdx  nodeCls  pSV  pPV  modelSubSV  truthLabel  truthHadidx\n";
+  std::cout << "----------------------------------------------------------------\n";
 
   for (int idx : comp) {
     const int trk = toTrkIdx(idx);
-    const int mSV = modelSVLabel(idx);
+    const int mNode = modelNodeClass(idx);
+    const float psv = pSV(idx);
+    const float ppv = pPV(idx);
     const int mSu = subArgMax(idx)+2;
 
     auto jt = truthByTrack.find(trk);
@@ -1607,13 +1625,17 @@ auto printCompDetails = [&](const std::vector<int>& comp, int compnum) {
       const int tHid = jt->second.second;
 
       std::cout << std::setw(5) << trk << "  "
-                << std::setw(7) << mSV << "  "
+                << std::setw(7) << mNode << "  "
+                << std::setw(3) << std::fixed << std::setprecision(2) << psv << "  "
+                << std::setw(3) << std::fixed << std::setprecision(2) << ppv << "  "
                 << std::setw(10) << mSu << "  "
                 << std::setw(10) << tLab << "  "
                 << std::setw(11) << tHid << "\n";
     } else {
       std::cout << std::setw(5) << trk << "  "
-                << std::setw(7) << mSV << "  "
+                << std::setw(7) << mNode << "  "
+                << std::setw(3) << std::fixed << std::setprecision(2) << psv << "  "
+                << std::setw(3) << std::fixed << std::setprecision(2) << ppv << "  "
                 << std::setw(10) << mSu << "  "
                 << std::setw(10) << "NA" << "  "
                 << std::setw(11) << "NA" << "\n";
@@ -1706,7 +1728,7 @@ for (auto const& comp : comps) {
 
     // predicted requirements
     if (RequireModelSV) {
-      if (softmax2_prob1(idx) <= pSVcut) continue;
+      if (!passSVGate(idx, pSVcut)) continue;
     }
 
     const int predSub = subArgMax(idx);
@@ -1784,7 +1806,7 @@ for (auto const& comp : comps) {
     if (hasTruth) continue;
 
     if (RequireModelSV) {
-      if (softmax2_prob1(idx) <= pSVcut) continue;
+      if (!passSVGate(idx, pSVcut)) continue;
     }
 
     const int sub = subArgMax(idx);
@@ -2536,4 +2558,3 @@ void DemoAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions
 
 //define this as a plug-in
 DEFINE_FWK_MODULE(DemoAnalyzer);
-

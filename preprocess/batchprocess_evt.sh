@@ -3,9 +3,9 @@
 # -----------------------------
 # Directory paths
 # -----------------------------
-INPUT_DIR="/store/user/nvenkata/BTV/toproc_1201/"
+INPUT_DIR="/store/group/lpcljm/nvenkata/hplusc/toproc_0503"
 TMP_DIR="/uscms/home/nvenkata/nobackup/BTV/preprocess/tmp"
-OUTPUT_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201"
+OUTPUT_DIR="/store/group/lpcljm/nvenkata/hplusc/fortrain_hplusc_0803"
 EOS_PREFIX="root://cmseos.fnal.gov/"
 
 mkdir -p "$TMP_DIR"
@@ -23,6 +23,7 @@ process_file() {
     local filename
     filename=$(basename "$file_path")
     local save_tag="${filename%.root}"
+    echo $save_tag
 
     local mod_file_path="${EOS_PREFIX}${file_path}"
     local local_out="${TMP_DIR}/evttraindata_${save_tag}.pt"

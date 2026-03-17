@@ -100,7 +100,7 @@ for f, feat_name in enumerate(edge_feature_names):
         values = edge_feature_data[tag][f]
         if values.size:
             plt.hist(values, bins=args.bins, alpha=0.5, label=tag, color=color, log=True)
-            plt.xscale("log")
+            #plt.xscale("log")
             plt.grid(True, which="both", axis="both", linestyle="--", alpha=0.4)
 
     plt.title(f"Edge Feature: {feat_name}")

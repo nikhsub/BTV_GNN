@@ -184,7 +184,7 @@ def create_event_graphs(trk_data, trk_label_array, trk_hadidx_array, trk_flav_ar
         pair_mom = pair_mom_array[evt]
         pair_invmass = pair_invmass_array[evt]
         
-        edge_index, edge_features, edge_labels = create_edge_index(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
+        edge_index, edge_features, edge_labels = create_edge_index_full(trk_1, trk_2, dca, deltaR, dca_sig, cptopv, pvtoPCA_1, pvtoPCA_2, dotprod_1, dotprod_2, pair_mom, pair_invmass, trk_hadidx_evt, trk_flav_evt)
         if edge_index.shape[1] == 0:
             continue
 

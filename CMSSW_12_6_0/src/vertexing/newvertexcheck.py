@@ -31,7 +31,8 @@ total_SVs_ivf  = 0
 # ------------------------
 # Loop over events
 # ------------------------
-for entry in tree:
+for i, entry in enumerate(tree):
+    if(i%1000==0): print(i)    
     n_gv  = entry.nGV[0]
     n_sv_reco = entry.nSVs_reco[0]
     n_sv_ivf  = entry.nSVs[0]

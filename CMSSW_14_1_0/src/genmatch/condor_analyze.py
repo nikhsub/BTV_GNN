@@ -10,6 +10,7 @@ def parse_arguments():
     parser.add_argument('-i', "--input", default="", help="The input directory where the analyzer output trees are")
     parser.add_argument('-o', "--output", default="", help="The main output directory for log files")
     parser.add_argument('-ec', "--evtchunks", default=3000, type=int, help="Events per chunk")
+    parser.add_argument('-st', "--savetag", help="Savetag")
     return parser.parse_args()
 
 def get_total_events(filename):
@@ -53,6 +54,7 @@ def main():
 
     root_files = get_root_files(args.input)
     events_per_chunk = args.evtchunks
+    tag = args.savetag
 
     for file_index, filename in enumerate(root_files, start=1):  # Start file index from 1
         # Adjust filename path for Condor
@@ -77,7 +79,7 @@ def main():
 
             # Create Condor submit file in the chunk folder
             condor_file = create_condor_submit_file(
-                chunk_folder, f"{file_index}_chunk{chunk}", "trkinfo.py", "submit.sh", filename, current, start, end
+                chunk_folder, f"{file_index}_chunk{chunk}_{tag}", "trkinfo.py", "submit.sh", filename, current, start, end
             )
 
             # Set permissions and submit the job

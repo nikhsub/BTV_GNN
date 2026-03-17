@@ -2,9 +2,9 @@
 
 #SRC_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/test"
 #DEST_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
-SRC_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/"
-DEST_DIR="/store/user/nvenkata/BTV/fortrain_fullconn_ttbarhad_1201/excess"
-NUM="677"
+SRC_DIR="/store/group/lpcljm/nvenkata/hplusc/fortrain_hplusc_0803"
+DEST_DIR="/store/group/lpcljm/nvenkata/hplusc/fortrain_hplusc_0803/excess"
+NUM="1610"
 
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""
