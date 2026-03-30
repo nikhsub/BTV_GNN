@@ -2,16 +2,16 @@
 
 #SRC_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/test"
 #DEST_DIR="/store/user/nvenkata/BTV/proc_fortrain_ttbarhad_1311/"
-SRC_DIR="/store/group/lpcljm/nvenkata/hplusc/fortrain_hplusc_0803"
-DEST_DIR="/store/group/lpcljm/nvenkata/hplusc/fortrain_hplusc_0803/excess"
-NUM="1610"
+SRC_DIR="/store/user/nvenkata/BTV/ttbarhad_toproc_1703/processed"
+DEST_DIR="/store/user/nvenkata/BTV/ttbarhad_toproc_1703/"
+NUM="272"
 
 #EOS_PREFIX="root://cmseos.fnal.gov/"
 EOS_PREFIX=""
 
 # Get a list of ROOT files in the source directory
-files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.pt$" | head -n "$NUM")
-#files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.root$" | head -n "$NUM")
+#files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.pt$" | head -n "$NUM")
+files=$(xrdfsls $EOS_PREFIX"$SRC_DIR" | grep "\.root$" | head -n "$NUM")
 
 #echo $files
 

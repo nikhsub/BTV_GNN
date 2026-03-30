@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <iomanip>
 #include <unordered_map>
+#include "TH1F.h"
 
 // function to get 3D distance bewtween all SV and all GV
 std::vector<std::vector<float>> computeDistanceMatrix(
@@ -84,7 +85,6 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
 	genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
 {
 	edm::Service<TFileService> fs;	
-	//usesResource("TFileService");
    	tree = fs->make<TTree>("tree", "tree");
 }
 
@@ -1107,19 +1107,19 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	const float SeedSVcut     = 0.20f;   // seeds must be SV-like
 	const float NodeSVmin     = 0.10f;   // allow low pSV nodes ONLY during expansion (not for seeding)
 	const float PVVetoCut     = 0.50f;   // reject tracks with large PV probability from SV flow
-	const float EdgeMin       = 0.10f;   // used only for bookkeeping / optional weak attach (keep as you had)
+	const float EdgeMin       = 0.30f;   // used only for bookkeeping / optional weak attach (keep as you had)
 	const float EdgeStrongCC  = 0.20f;   // STRONG edges for connectivity (CC), scan 0.85..0.95
-	const float EdgeStrongAtt = 0.30f;   // STRONG edges for attachment into an existing comp
+	const float EdgeStrongAtt = 0.20f;   // STRONG edges for attachment into an existing comp
 	const int   MinClusterSize = 2;
 	
 	// Expansion rule: node joins comp if it has >=AttachMinStrong strong edges into that comp,
 	// OR mean strong-edge score into comp >= AttachMinMean.
 	const int   AttachMinStrong = 2;     // try 1 or 2
-	const float AttachMinMean   = 0.80f; // try 0.85..0.92
+	const float AttachMinMean   = 0.30f; // try 0.85..0.92
 	
 	// Optional mutual topK pruning on strong edges (recommended; kills bridges)
 	const bool  UseMutualTopK = true;
-	const int   TopK = 5;               // keep topK strong neighbors per node (mutual only), try 3..8
+	const int   TopK = 8;               // keep topK strong neighbors per node (mutual only), try 3..8
 
 	
 	// ------------------------------
@@ -1197,294 +1197,208 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 	auto pEdge   = [&](int e) -> float { return sigmoid(edge_logits_flat[e]); };
 
 	// ------------------------------
-	// Step 4 (REPLACED): Seed selection
-	//   - Only nodes with high SV probability and low PV probability can START a cluster.
-	//   - Nodes with lower SV probability can be ATTACHED later, but still pass PV veto.
+	// Step 4-7 wrapped as a reusable builder, so we can scan structural cuts.
 	// ------------------------------
-	std::vector<char> isSeed(N, 0);
-	std::vector<char> isEligible(N, 0);
-	
-	for (int i = 0; i < N; ++i) {
-	  if (passSVGate(i, SeedSVcut)) isSeed[i] = 1;
-	  if (passSVGate(i, NodeSVmin)) isEligible[i] = 1;
-	}
-	
-	// ------------------------------
-	// Step 5 (MODIFIED): Build STRONG adjacency only, plus (optional) weak list
-	//   - adjStrongRaw holds edges with pe >= EdgeStrongCC
-	// ------------------------------
-	std::vector<std::vector<int>> adjStrongRaw(N);	
-
 	auto pack = [&](int a, int b) -> uint64_t {
 	  return (uint64_t(uint32_t(a)) << 32) | uint32_t(b);
 	};
 	struct U64Hash { size_t operator()(uint64_t x) const noexcept { return std::hash<uint64_t>{}(x); } };
-	
-	std::unordered_map<uint64_t, float, U64Hash> edgeScore;
-	edgeScore.reserve((size_t)E * 2);
-	
-	for (int e = 0; e < E; ++e) {
-	  int u = edgeSrc(e);
-	  int v = edgeDst(e);
-	  if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
-	  if (!isEligible[u] || !isEligible[v]) continue;
-	
-	  float pe = pEdge(e);
-	  if (!std::isfinite(pe)) continue;
-	  if (pe < EdgeMin) continue;
-	
-	  // store score both directions
-	  edgeScore[pack(u,v)] = pe;
-	  edgeScore[pack(v,u)] = pe;
-	
-	  if (pe >= EdgeStrongCC) {
-	    adjStrongRaw[u].push_back(v);
-	    adjStrongRaw[v].push_back(u);
-	  } 
-	}	
 
-	// ------------------------------
-	// Optional: Mutual topK pruning on STRONG edges
-	//   - For each node u, keep only topK neighbors by pe among strong edges
-	//   - Then keep edge (u,v) only if u keeps v AND v keeps u
-	// ------------------------------
+	auto buildComponents = [&](float seedCut, float nodeMinCut, float edgeMinCut) {
+	  std::vector<char> isSeed(N, 0);
+	  std::vector<char> isEligible(N, 0);
+	  for (int i = 0; i < N; ++i) {
+	    if (passSVGate(i, seedCut)) isSeed[i] = 1;
+	    if (passSVGate(i, nodeMinCut)) isEligible[i] = 1;
+	  }
 
-	std::vector<std::vector<int>> adjStrong(N);
+	  std::vector<std::vector<int>> adjStrongRaw(N);
+	  std::unordered_map<uint64_t, float, U64Hash> edgeScore;
+	  edgeScore.reserve((size_t)E * 2);
 
-	if (UseMutualTopK) {
-	  // top list per node
-	  std::vector<std::vector<int>> topNbrs(N);
-	  topNbrs.reserve(N);
-	
+	  for (int e = 0; e < E; ++e) {
+	    int u = edgeSrc(e);
+	    int v = edgeDst(e);
+	    if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
+	    if (!isEligible[u] || !isEligible[v]) continue;
+
+	    float pe = pEdge(e);
+	    if (!std::isfinite(pe)) continue;
+	    if (pe < edgeMinCut) continue;
+
+	    edgeScore[pack(u,v)] = pe;
+	    edgeScore[pack(v,u)] = pe;
+
+	    if (pe >= EdgeStrongCC) {
+	      adjStrongRaw[u].push_back(v);
+	      adjStrongRaw[v].push_back(u);
+	    }
+	  }
+
+	  std::vector<std::vector<int>> adjStrong(N);
+	  if (UseMutualTopK) {
+	    std::vector<std::vector<int>> topNbrs(N);
+	    topNbrs.reserve(N);
+	    for (int u = 0; u < N; ++u) {
+	      auto &nb = adjStrongRaw[u];
+	      if (nb.empty()) continue;
+	      std::sort(nb.begin(), nb.end(), [&](int a, int b){
+	        float sa = 0.f, sb = 0.f;
+	        auto ita = edgeScore.find(pack(u,a)); if (ita != edgeScore.end()) sa = ita->second;
+	        auto itb = edgeScore.find(pack(u,b)); if (itb != edgeScore.end()) sb = itb->second;
+	        return sa > sb;
+	      });
+	      if ((int)nb.size() > TopK) nb.resize(TopK);
+	      topNbrs[u] = nb;
+	    }
+
+	    std::unordered_set<uint64_t, U64Hash> keepEdge;
+	    keepEdge.reserve((size_t)N * (size_t)TopK * 2);
+	    for (int u = 0; u < N; ++u) for (int v : topNbrs[u]) keepEdge.insert(pack(u,v));
+	    for (int u = 0; u < N; ++u) {
+	      for (int v : topNbrs[u]) {
+	        if (keepEdge.find(pack(v,u)) == keepEdge.end()) continue;
+	        adjStrong[u].push_back(v);
+	      }
+	    }
+	  } else {
+	    adjStrong.swap(adjStrongRaw);
+	  }
+
 	  for (int u = 0; u < N; ++u) {
-	    auto &nb = adjStrongRaw[u];
+	    auto &nb = adjStrong[u];
 	    if (nb.empty()) continue;
-	
-	    // sort neighbors by edge score descending
-	    std::sort(nb.begin(), nb.end(), [&](int a, int b){
-	      float sa = 0.f, sb = 0.f;
-	      auto ita = edgeScore.find(pack(u,a)); if (ita != edgeScore.end()) sa = ita->second;
-	      auto itb = edgeScore.find(pack(u,b)); if (itb != edgeScore.end()) sb = itb->second;
-	      return sa > sb;
-	    });
-	
-	    if ((int)nb.size() > TopK) nb.resize(TopK);
-	    topNbrs[u] = nb;
+	    std::sort(nb.begin(), nb.end());
+	    nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
 	  }
-	
-	  // membership test: store kept neighbors in a hash set per node (packed key)
-	  std::unordered_set<uint64_t, U64Hash> keepEdge;
-	  keepEdge.reserve((size_t)N * (size_t)TopK * 2);
-	
-	  for (int u = 0; u < N; ++u) {
-	    for (int v : topNbrs[u]) {
-	      keepEdge.insert(pack(u,v));
-	    }
-	  }
-	
-	  // mutualize
-	  for (int u = 0; u < N; ++u) {
-	    for (int v : topNbrs[u]) {
-	      if (keepEdge.find(pack(v,u)) == keepEdge.end()) continue;
-	      adjStrong[u].push_back(v);
-	    }
-	  }
-	} else {
-	  adjStrong.swap(adjStrongRaw);
-	}
-	
-	// Optional: de-duplicate adjStrong
-	for (int u = 0; u < N; ++u) {
-	  auto &nb = adjStrong[u];
-	  if (nb.empty()) continue;
-	  std::sort(nb.begin(), nb.end());
-	  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
-	}
 
-	
-	// ------------------------------
-	// Step 6 (REPLACED): Connected components on STRONG edges seeded by SV-like nodes
-	//   - We do BFS/DFS starting ONLY from seeds
-	//   - Component grows ONLY through adjStrong (EdgeStrongCC, possibly pruned by TopK)
-	// ------------------------------
-	std::vector<char> visited(N, 0);
-	std::vector<std::vector<int>> comps;
-	comps.reserve(N);
-	
-	std::vector<int> stack;
-	stack.reserve(512);
-	
-	for (int start = 0; start < N; ++start) {
-	  if (!isSeed[start]) continue;
-	  if (visited[start]) continue;
-	  if (adjStrong[start].empty()) continue;
-	
-	  visited[start] = 1;
-	  comps.emplace_back();
-	  auto &comp = comps.back();
-	  comp.reserve(64);
-	
-	  stack.clear();
-	  stack.push_back(start);
-	
-	  while (!stack.empty()) {
-	    int u = stack.back();
-	    stack.pop_back();
-	    comp.push_back(u);
-	
-	    for (int v : adjStrong[u]) {
-	      if (!isEligible[v]) continue;
-	      if (visited[v]) continue;
-	      // Only traverse if v is eligible AND connected by strong edges
-	      visited[v] = 1;
-	      stack.push_back(v);
-	    }
-	  }
-	}
+	  std::vector<char> visited(N, 0);
+	  std::vector<std::vector<int>> localComps;
+	  localComps.reserve(N);
+	  std::vector<int> stack;
+	  stack.reserve(512);
 
-	// ------------------------------
-	// Step 6b (NEW): Expand each strong component by attaching eligible nodes
-	//   - A node can be attached if it has strong attachment into the component
-	//   - This recovers low-pSV true tracks WITHOUT letting them bridge components.
-	//   - IMPORTANT: We never merge two components during expansion.
-	// ------------------------------
-	std::vector<int> compId(N, -1);
-	for (int ci = 0; ci < (int)comps.size(); ++ci) {
-	  for (int u : comps[ci]) compId[u] = ci;
-	}
-	
-	// Build a per-node list of strong neighbors for attachment using a looser threshold EdgeStrongAtt.
-	// We’ll just query edgeScore for neighbors already in adjStrongRaw/adjStrong.
-	// If you want: build adjAttach from all edges with pe >= EdgeStrongAtt.
-	// Here we reuse edgeScore + adjStrongRaw adjacency to limit work.
-	std::vector<std::vector<int>> adjAttach(N);
-		
-	for (int e = 0; e < E; ++e) {
-	  int u = edgeSrc(e);
-	  int v = edgeDst(e);
-	  if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
-	  if (!isEligible[u] || !isEligible[v]) continue;
-	
-	  float pe = pEdge(e);
-	  if (!std::isfinite(pe)) continue;
-	  if (pe < EdgeStrongAtt) continue;
-	
-	  adjAttach[u].push_back(v);
-	  adjAttach[v].push_back(u);
-	}
-	for (int u = 0; u < N; ++u) {
-	  auto &nb = adjAttach[u];
-	  if (nb.empty()) continue;
-	  std::sort(nb.begin(), nb.end());
-	  nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
-	}
-
-	for (int ci = 0; ci < (int)comps.size(); ++ci) {
-    	  auto &comp = comps[ci];
-	
-	  if ((int)comp.size() < MinClusterSize) continue;
-	
-	  // mark members for fast membership test
-	  // (use a stamp array to avoid clearing O(N))
-	  static std::vector<int> mark;
-	  static int stamp = 1;
-	  if ((int)mark.size() != N) mark.assign(N, 0);
-	  ++stamp;
-	  for (int u : comp) mark[u] = stamp;
-	
-	  bool changed = true;
-	  int iter = 0;
-	  const int MaxExpandIters = 6;
-	
-	  while (changed && iter++ < MaxExpandIters) {
-	    changed = false;
-	
-	    // Candidate pool: neighbors of current comp via attach edges
-	    std::vector<int> candidates;
-	    candidates.reserve(comp.size() * 4);
-	
-	    for (int u : comp) {
-	      for (int v : adjAttach[u]) {
-	        if (!isEligible[v]) continue;
-	        if (mark[v] == stamp) continue;
-	        candidates.push_back(v);
+	  for (int start = 0; start < N; ++start) {
+	    if (!isSeed[start] || visited[start] || adjStrong[start].empty()) continue;
+	    visited[start] = 1;
+	    localComps.emplace_back();
+	    auto &comp = localComps.back();
+	    comp.reserve(64);
+	    stack.clear();
+	    stack.push_back(start);
+	    while (!stack.empty()) {
+	      int u = stack.back();
+	      stack.pop_back();
+	      comp.push_back(u);
+	      for (int v : adjStrong[u]) {
+	        if (!isEligible[v] || visited[v]) continue;
+	        visited[v] = 1;
+	        stack.push_back(v);
 	      }
 	    }
-	
-	    if (candidates.empty()) break;
-	    std::sort(candidates.begin(), candidates.end());
-	    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
-	
-	    // Test candidates against comp
-	    for (int v : candidates) {
-	      int strongCnt = 0;
-	      float sum = 0.f;
-	      int cnt = 0;
-	
-	      // Count attach edges into comp by scanning v’s attach neighbors
-	      for (int nb : adjAttach[v]) {
-	        if (mark[nb] != stamp) continue;
-	        auto it = edgeScore.find(pack(v, nb));
-	        if (it == edgeScore.end()) continue;
-	        float pe = it->second;
-	        // pe >= EdgeStrongAtt by construction, but keep the check if you change builders
-	        if (pe < EdgeStrongAtt) continue;
-	        strongCnt++;
-	        sum += pe;
-	        cnt++;
+	  }
+
+	  std::vector<int> compId(N, -1);
+	  for (int ci = 0; ci < (int)localComps.size(); ++ci) for (int u : localComps[ci]) compId[u] = ci;
+
+	  std::vector<std::vector<int>> adjAttach(N);
+	  for (int e = 0; e < E; ++e) {
+	    int u = edgeSrc(e);
+	    int v = edgeDst(e);
+	    if ((unsigned)u >= (unsigned)N || (unsigned)v >= (unsigned)N) continue;
+	    if (!isEligible[u] || !isEligible[v]) continue;
+	    float pe = pEdge(e);
+	    if (!std::isfinite(pe) || pe < EdgeStrongAtt) continue;
+	    adjAttach[u].push_back(v);
+	    adjAttach[v].push_back(u);
+	  }
+	  for (int u = 0; u < N; ++u) {
+	    auto &nb = adjAttach[u];
+	    if (nb.empty()) continue;
+	    std::sort(nb.begin(), nb.end());
+	    nb.erase(std::unique(nb.begin(), nb.end()), nb.end());
+	  }
+
+	  for (int ci = 0; ci < (int)localComps.size(); ++ci) {
+	    auto &comp = localComps[ci];
+	    if ((int)comp.size() < MinClusterSize) continue;
+	    static std::vector<int> mark;
+	    static int stamp = 1;
+	    if ((int)mark.size() != N) mark.assign(N, 0);
+	    ++stamp;
+	    for (int u : comp) mark[u] = stamp;
+
+	    bool changed = true;
+	    int iter = 0;
+	    const int MaxExpandIters = 6;
+	    while (changed && iter++ < MaxExpandIters) {
+	      changed = false;
+	      std::vector<int> candidates;
+	      candidates.reserve(comp.size() * 4);
+	      for (int u : comp) {
+	        for (int v : adjAttach[u]) {
+	          if (!isEligible[v] || mark[v] == stamp) continue;
+	          candidates.push_back(v);
+	        }
 	      }
-	
-	      float mean = (cnt > 0) ? (sum / float(cnt)) : 0.f;
+	      if (candidates.empty()) break;
+	      std::sort(candidates.begin(), candidates.end());
+	      candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
 
-	      if (strongCnt >= AttachMinStrong || mean >= AttachMinMean) {
-		  int old = compId[v];
-		
-		  // If v already belongs to another comp, remove it from there
-		  if (old >= 0) {
-		    auto &oldComp = comps[old];
-		    oldComp.erase(
-		      std::remove(oldComp.begin(), oldComp.end(), v),
-		      oldComp.end()
-		    );
-		  }
-		
-		  comp.push_back(v);
-		  mark[v] = stamp;
-		  compId[v] = ci;   // assign directly to THIS comp
-		  changed = true;
-		}
-	
-	      
+	      for (int v : candidates) {
+	        int strongCnt = 0;
+	        float sum = 0.f;
+	        int cnt = 0;
+	        for (int nb : adjAttach[v]) {
+	          if (mark[nb] != stamp) continue;
+	          auto it = edgeScore.find(pack(v, nb));
+	          if (it == edgeScore.end()) continue;
+	          float pe = it->second;
+	          if (pe < EdgeStrongAtt) continue;
+	          strongCnt++;
+	          sum += pe;
+	          cnt++;
+	        }
+	        float mean = (cnt > 0) ? (sum / float(cnt)) : 0.f;
+	        if (strongCnt >= AttachMinStrong || mean >= AttachMinMean) {
+	          int old = compId[v];
+	          if (old >= 0) {
+	            auto &oldComp = localComps[old];
+	            oldComp.erase(std::remove(oldComp.begin(), oldComp.end(), v), oldComp.end());
+	          }
+	          comp.push_back(v);
+	          mark[v] = stamp;
+	          compId[v] = ci;
+	          changed = true;
+	        }
+	      }
 	    }
-	
 	  }
-	}
-	
 
-	// ------------------------------
-	// Step 7 (SIMPLIFIED): Final cleanup (size cut) + optional SV-core requirement
-	//   - Require at least one strong SV-ish node inside component (prevents junk comps)
-	// ------------------------------
-	auto hasSVcore = [&](const std::vector<int> &comp) -> bool {
-	  float maxPSV = 0.f;
-	  int cnt30 = 0;
-	  for (int u : comp) {
-	    float ps = pSV(u);
-	    if (ps > maxPSV) maxPSV = ps;
-	    if (ps > 0.30f) cnt30++;
-	  }
-	  float frac30 = comp.empty() ? 0.f : float(cnt30) / float(comp.size());
-	  return (maxPSV > 0.70f) && (frac30 > 0.40f);
+	  //auto hasSVcore = [&](const std::vector<int> &comp) -> bool {
+	  //  float maxPSV = 0.f;
+	  //  int cnt30 = 0;
+	  //  for (int u : comp) {
+	  //    float ps = pSV(u);
+	  //    if (ps > maxPSV) maxPSV = ps;
+	  //    if (ps > 0.30f) cnt30++;
+	  //  }
+	  //  float frac30 = comp.empty() ? 0.f : float(cnt30) / float(comp.size());
+	  //  return (maxPSV > 0.70f) && (frac30 > 0.40f);
+	  //};
+
+	  localComps.erase(
+	    std::remove_if(localComps.begin(), localComps.end(), [&](auto const& c){
+	      if ((int)c.size() < MinClusterSize) return true;
+	      //if (!hasSVcore(c)) return true;
+	      return false;
+	    }),
+	    localComps.end()
+	  );
+	  return localComps;
 	};
-	
-	comps.erase(
-	  std::remove_if(comps.begin(), comps.end(), [&](auto const& c){
-	    if ((int)c.size() < MinClusterSize) return true;
-	    if (!hasSVcore(c)) return true;
-	    return false;
-	  }),
-	  comps.end()
-	);
+
+	std::vector<std::vector<int>> comps = buildComponents(SeedSVcut, NodeSVmin, EdgeMin);
 	
 	
 	
@@ -1833,6 +1747,282 @@ fake_B.push_back(fakeVerticesByPredSub[0]);
 fake_BtoC.push_back(fakeVerticesByPredSub[1]);
 fake_C.push_back(fakeVerticesByPredSub[2]);
 
+// ---------------------------------------------------------------------------
+// Operating-point scan in one pass:
+//   - Scans pSV and PV-veto thresholds used in matching/fake bookkeeping
+//   - Stores aggregate numerators/denominators and fake counts in 2D histograms
+//   - Final efficiency map can be derived offline as num/den per bin
+// ---------------------------------------------------------------------------
+static bool scanHistsInit = false;
+static TH1F* h_scan_seed_num_B = nullptr;
+static TH1F* h_scan_seed_den_B = nullptr;
+static TH1F* h_scan_seed_num_BtoC = nullptr;
+static TH1F* h_scan_seed_den_BtoC = nullptr;
+static TH1F* h_scan_seed_num_C = nullptr;
+static TH1F* h_scan_seed_den_C = nullptr;
+static TH1F* h_scan_seed_fake_B = nullptr;
+static TH1F* h_scan_seed_fake_BtoC = nullptr;
+static TH1F* h_scan_seed_fake_C = nullptr;
+static TH1F* h_scan_seed_events = nullptr;
+static TH1F* h_scan_node_num_B = nullptr;
+static TH1F* h_scan_node_den_B = nullptr;
+static TH1F* h_scan_node_num_BtoC = nullptr;
+static TH1F* h_scan_node_den_BtoC = nullptr;
+static TH1F* h_scan_node_num_C = nullptr;
+static TH1F* h_scan_node_den_C = nullptr;
+static TH1F* h_scan_node_fake_B = nullptr;
+static TH1F* h_scan_node_fake_BtoC = nullptr;
+static TH1F* h_scan_node_fake_C = nullptr;
+static TH1F* h_scan_node_events = nullptr;
+static TH1F* h_scan_edge_num_B = nullptr;
+static TH1F* h_scan_edge_den_B = nullptr;
+static TH1F* h_scan_edge_num_BtoC = nullptr;
+static TH1F* h_scan_edge_den_BtoC = nullptr;
+static TH1F* h_scan_edge_num_C = nullptr;
+static TH1F* h_scan_edge_den_C = nullptr;
+static TH1F* h_scan_edge_fake_B = nullptr;
+static TH1F* h_scan_edge_fake_BtoC = nullptr;
+static TH1F* h_scan_edge_fake_C = nullptr;
+static TH1F* h_scan_edge_events = nullptr;
+static TH1F* h_b_diag_stage_sum = nullptr;
+static TH1F* h_btoc_diag_stage_sum = nullptr;
+static TH1F* h_c_diag_stage_sum = nullptr;
+static TH1F* h_c_diag_event_counter = nullptr;
+static TH1F* h_b_diag_event_counter_with_b = nullptr;
+static TH1F* h_btoc_diag_event_counter_with_btoc = nullptr;
+static TH1F* h_c_diag_event_counter_with_c = nullptr;
+
+if (!scanHistsInit) {
+  edm::Service<TFileService> fs;
+  h_scan_seed_num_B    = fs->make<TH1F>("scan_seed_num_B", "Matched hadidx (truth=2);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_den_B    = fs->make<TH1F>("scan_seed_den_B", "Total hadidx (truth=2);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_num_BtoC = fs->make<TH1F>("scan_seed_num_BtoC", "Matched hadidx (truth=3);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_den_BtoC = fs->make<TH1F>("scan_seed_den_BtoC", "Total hadidx (truth=3);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_num_C    = fs->make<TH1F>("scan_seed_num_C", "Matched hadidx (truth=4);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_den_C    = fs->make<TH1F>("scan_seed_den_C", "Total hadidx (truth=4);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_fake_B   = fs->make<TH1F>("scan_seed_fake_B", "Fake vertices (predSub=0);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_fake_BtoC= fs->make<TH1F>("scan_seed_fake_BtoC", "Fake vertices (predSub=1);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_fake_C   = fs->make<TH1F>("scan_seed_fake_C", "Fake vertices (predSub=2);SeedSVcut;count", 19, 0.025, 0.975);
+  h_scan_seed_events   = fs->make<TH1F>("scan_seed_events", "Event counter;SeedSVcut;count", 19, 0.025, 0.975);
+
+  h_scan_node_num_B    = fs->make<TH1F>("scan_node_num_B", "Matched hadidx (truth=2);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_den_B    = fs->make<TH1F>("scan_node_den_B", "Total hadidx (truth=2);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_num_BtoC = fs->make<TH1F>("scan_node_num_BtoC", "Matched hadidx (truth=3);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_den_BtoC = fs->make<TH1F>("scan_node_den_BtoC", "Total hadidx (truth=3);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_num_C    = fs->make<TH1F>("scan_node_num_C", "Matched hadidx (truth=4);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_den_C    = fs->make<TH1F>("scan_node_den_C", "Total hadidx (truth=4);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_fake_B   = fs->make<TH1F>("scan_node_fake_B", "Fake vertices (predSub=0);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_fake_BtoC= fs->make<TH1F>("scan_node_fake_BtoC", "Fake vertices (predSub=1);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_fake_C   = fs->make<TH1F>("scan_node_fake_C", "Fake vertices (predSub=2);NodeSVmin;count", 19, 0.025, 0.975);
+  h_scan_node_events   = fs->make<TH1F>("scan_node_events", "Event counter;NodeSVmin;count", 19, 0.025, 0.975);
+
+  h_scan_edge_num_B    = fs->make<TH1F>("scan_edge_num_B", "Matched hadidx (truth=2);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_den_B    = fs->make<TH1F>("scan_edge_den_B", "Total hadidx (truth=2);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_num_BtoC = fs->make<TH1F>("scan_edge_num_BtoC", "Matched hadidx (truth=3);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_den_BtoC = fs->make<TH1F>("scan_edge_den_BtoC", "Total hadidx (truth=3);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_num_C    = fs->make<TH1F>("scan_edge_num_C", "Matched hadidx (truth=4);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_den_C    = fs->make<TH1F>("scan_edge_den_C", "Total hadidx (truth=4);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_fake_B   = fs->make<TH1F>("scan_edge_fake_B", "Fake vertices (predSub=0);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_fake_BtoC= fs->make<TH1F>("scan_edge_fake_BtoC", "Fake vertices (predSub=1);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_fake_C   = fs->make<TH1F>("scan_edge_fake_C", "Fake vertices (predSub=2);EdgeMin;count", 19, 0.025, 0.975);
+  h_scan_edge_events   = fs->make<TH1F>("scan_edge_events", "Event counter;EdgeMin;count", 19, 0.025, 0.975);
+
+  auto setDiagBinLabels = [&](TH1F* h) {
+    h->GetXaxis()->SetBinLabel(1, "total_C");
+    h->GetXaxis()->SetBinLabel(2, "Had_with2tracks");
+    h->GetXaxis()->SetBinLabel(3, "Had_with2tracks_cuts");
+    h->GetXaxis()->SetBinLabel(4, "Had_with2tracks_cuts_comp");
+    h->GetXaxis()->SetBinLabel(5, "Had_with2tracks_cuts_sublabel");
+    h->GetXaxis()->SetBinLabel(6, "Had_finalselection");
+  };
+
+  h_b_diag_stage_sum = fs->make<TH1F>("b_diag_stage_sum", "B hadron stage sums;stage;count", 6, 0.5, 6.5);
+  setDiagBinLabels(h_b_diag_stage_sum);
+  h_btoc_diag_stage_sum = fs->make<TH1F>("btoc_diag_stage_sum", "BtoC hadron stage sums;stage;count", 6, 0.5, 6.5);
+  setDiagBinLabels(h_btoc_diag_stage_sum);
+  h_c_diag_stage_sum = fs->make<TH1F>("c_diag_stage_sum", "C hadron stage sums;stage;count", 6, 0.5, 6.5);
+  setDiagBinLabels(h_c_diag_stage_sum);
+
+  h_c_diag_event_counter = fs->make<TH1F>("c_diag_event_counter", "C diagnostics event counter;bin;count", 1, 0.5, 1.5);
+  h_b_diag_event_counter_with_b = fs->make<TH1F>("b_diag_event_counter_with_b", "B diagnostics events with B hadidx;bin;count", 1, 0.5, 1.5);
+  h_btoc_diag_event_counter_with_btoc = fs->make<TH1F>("btoc_diag_event_counter_with_btoc", "BtoC diagnostics events with BtoC hadidx;bin;count", 1, 0.5, 1.5);
+  h_c_diag_event_counter_with_c = fs->make<TH1F>("c_diag_event_counter_with_c", "C diagnostics events with C hadidx;bin;count", 1, 0.5, 1.5);
+  scanHistsInit = true;
+}
+
+h_c_diag_event_counter->Fill(1.0);
+
+auto fillFlavorDiag = [&](int truthLabel, TH1F* stageHist, TH1F* hasFlavorEvtHist) {
+  std::unordered_map<int, int> truthTrackCount;
+  std::unordered_map<int, int> gateTrackCount;
+  std::unordered_map<int, int> compGateTrackCount;
+  std::unordered_map<int, int> gateSubTrackCount;
+  truthTrackCount.reserve(256);
+  gateTrackCount.reserve(256);
+  compGateTrackCount.reserve(256);
+  gateSubTrackCount.reserve(256);
+
+  for (auto const& [trk, lh] : truthByTrack) {
+    const int lab = lh.first;
+    const int hid = lh.second;
+    if (lab == truthLabel && hid >= 0) truthTrackCount[hid] += 1;
+  }
+
+  for (int idx = 0; idx < N; ++idx) {
+    const int trk = toTrkIdx(idx);
+    auto it = truthByTrack.find(trk);
+    if (it == truthByTrack.end()) continue;
+    const int lab = it->second.first;
+    const int hid = it->second.second;
+    if (lab != truthLabel || hid < 0) continue;
+    if (passSVGate(idx, pSVcut)) {
+      gateTrackCount[hid] += 1;
+      if (subArgMax(idx) == truthToSub(truthLabel)) gateSubTrackCount[hid] += 1;
+    }
+  }
+
+  for (auto const& comp : comps) {
+    for (int idx : comp) {
+      const int trk = toTrkIdx(idx);
+      auto it = truthByTrack.find(trk);
+      if (it == truthByTrack.end()) continue;
+      const int lab = it->second.first;
+      const int hid = it->second.second;
+      if (lab != truthLabel || hid < 0) continue;
+      if (passSVGate(idx, pSVcut)) compGateTrackCount[hid] += 1;
+    }
+  }
+
+  int truthGe2 = 0;
+  for (auto const& [hid, cnt] : truthTrackCount) if (cnt >= 2) truthGe2++;
+  int gateGe2 = 0;
+  for (auto const& [hid, cnt] : gateTrackCount) if (cnt >= 2) gateGe2++;
+  int compGateGe2 = 0;
+  for (auto const& [hid, cnt] : compGateTrackCount) if (cnt >= 2) compGateGe2++;
+  int gateSubGe2 = 0;
+  for (auto const& [hid, cnt] : gateSubTrackCount) if (cnt >= 2) gateSubGe2++;
+
+  const int totalHadidx = static_cast<int>(totalHadidxByTruthLabel[truthLabel].size());
+  const int finalMatched = static_cast<int>(matchedHadidxByTruthLabel[truthLabel].size());
+
+  stageHist->Fill(1.0, static_cast<double>(totalHadidx));
+  stageHist->Fill(2.0, static_cast<double>(truthGe2));
+  stageHist->Fill(3.0, static_cast<double>(gateGe2));
+  stageHist->Fill(4.0, static_cast<double>(compGateGe2));
+  stageHist->Fill(5.0, static_cast<double>(gateSubGe2));
+  stageHist->Fill(6.0, static_cast<double>(finalMatched));
+  if (totalHadidx > 0) hasFlavorEvtHist->Fill(1.0);
+};
+
+fillFlavorDiag(2, h_b_diag_stage_sum, h_b_diag_event_counter_with_b);
+fillFlavorDiag(3, h_btoc_diag_stage_sum, h_btoc_diag_event_counter_with_btoc);
+fillFlavorDiag(4, h_c_diag_stage_sum, h_c_diag_event_counter_with_c);
+
+auto passSVGateCut = [&](int i, float svCut, float pvCut) -> bool {
+  return (pSV(i) > svCut) && (pPV(i) < pvCut);
+};
+
+const std::vector<float> scanSVcuts = {
+  0.05f, 0.10f, 0.15f, 0.20f, 0.25f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f,
+  0.55f, 0.60f, 0.65f, 0.70f, 0.75f, 0.80f, 0.85f, 0.90f, 0.95f
+};
+
+auto evaluateComps = [&](const std::vector<std::vector<int>>& compsIn, float svCut, float pvCut) {
+  std::array<float,3> num = {{0.f, 0.f, 0.f}};   // truth labels 2/3/4 mapped to [0/1/2]
+  std::array<float,3> den = {{
+    static_cast<float>(totalHadidxByTruthLabel[2].size()),
+    static_cast<float>(totalHadidxByTruthLabel[3].size()),
+    static_cast<float>(totalHadidxByTruthLabel[4].size())
+  }};
+  std::array<float,3> fake = {{0.f, 0.f, 0.f}};
+
+  std::array<std::unordered_set<int>, C_TRUTH> matchedScan;
+  for (auto& s : matchedScan) s.reserve(256);
+
+  for (auto const& comp : compsIn) {
+    std::unordered_map<int,int> cnt2, cnt3, cnt4;
+    cnt2.reserve(64); cnt3.reserve(64); cnt4.reserve(64);
+    std::array<int, 3> unmatchedCountBySub{};
+
+    for (int idx : comp) {
+      if (!passSVGateCut(idx, svCut, pvCut)) continue;
+      const int trk = toTrkIdx(idx);
+      auto itTruth = truthByTrack.find(trk);
+      if (itTruth != truthByTrack.end()) {
+        const int lab = itTruth->second.first;
+        const int hid = itTruth->second.second;
+        if (hid < 0) continue;
+        if (!(lab == 2 || lab == 3 || lab == 4)) continue;
+        const int predSub = subArgMax(idx);
+        const int wantSub = truthToSub(lab);
+        if (wantSub < 0 || predSub != wantSub) continue;
+        if (lab == 2) ++cnt2[hid];
+        else if (lab == 3) ++cnt3[hid];
+        else ++cnt4[hid];
+      } else {
+        const int sub = subArgMax(idx);
+        if (sub >= 0 && sub < 3) unmatchedCountBySub[sub]++;
+      }
+    }
+
+    for (auto const& [hid, n] : cnt2) if (n >= 2) matchedScan[2].insert(hid);
+    for (auto const& [hid, n] : cnt3) if (n >= 2) matchedScan[3].insert(hid);
+    for (auto const& [hid, n] : cnt4) if (n >= 2) matchedScan[4].insert(hid);
+    for (int s = 0; s < 3; ++s) if (unmatchedCountBySub[s] >= 2) fake[s] += 1.f;
+  }
+
+  num[0] = static_cast<float>(matchedScan[2].size());
+  num[1] = static_cast<float>(matchedScan[3].size());
+  num[2] = static_cast<float>(matchedScan[4].size());
+  return std::make_tuple(num, den, fake);
+};
+
+// Structural scans: rebuild components while scanning SeedSVcut / NodeSVmin / EdgeMin.
+for (float seedCutScan : scanSVcuts) {
+  auto compsSeed = buildComponents(seedCutScan, NodeSVmin, EdgeMin);
+  auto [num, den, fake] = evaluateComps(compsSeed, pSVcut, PVVetoCut);
+  h_scan_seed_num_B->Fill(seedCutScan, num[0]);
+  h_scan_seed_den_B->Fill(seedCutScan, den[0]);
+  h_scan_seed_num_BtoC->Fill(seedCutScan, num[1]);
+  h_scan_seed_den_BtoC->Fill(seedCutScan, den[1]);
+  h_scan_seed_num_C->Fill(seedCutScan, num[2]);
+  h_scan_seed_den_C->Fill(seedCutScan, den[2]);
+  h_scan_seed_fake_B->Fill(seedCutScan, fake[0]);
+  h_scan_seed_fake_BtoC->Fill(seedCutScan, fake[1]);
+  h_scan_seed_fake_C->Fill(seedCutScan, fake[2]);
+  h_scan_seed_events->Fill(seedCutScan, 1.0f);
+}
+
+for (float nodeCutScan : scanSVcuts) {
+  auto compsNode = buildComponents(SeedSVcut, nodeCutScan, EdgeMin);
+  auto [num, den, fake] = evaluateComps(compsNode, pSVcut, PVVetoCut);
+  h_scan_node_num_B->Fill(nodeCutScan, num[0]);
+  h_scan_node_den_B->Fill(nodeCutScan, den[0]);
+  h_scan_node_num_BtoC->Fill(nodeCutScan, num[1]);
+  h_scan_node_den_BtoC->Fill(nodeCutScan, den[1]);
+  h_scan_node_num_C->Fill(nodeCutScan, num[2]);
+  h_scan_node_den_C->Fill(nodeCutScan, den[2]);
+  h_scan_node_fake_B->Fill(nodeCutScan, fake[0]);
+  h_scan_node_fake_BtoC->Fill(nodeCutScan, fake[1]);
+  h_scan_node_fake_C->Fill(nodeCutScan, fake[2]);
+  h_scan_node_events->Fill(nodeCutScan, 1.0f);
+}
+
+for (float edgeCutScan : scanSVcuts) {
+  auto compsEdge = buildComponents(SeedSVcut, NodeSVmin, edgeCutScan);
+  auto [num, den, fake] = evaluateComps(compsEdge, pSVcut, PVVetoCut);
+  h_scan_edge_num_B->Fill(edgeCutScan, num[0]);
+  h_scan_edge_den_B->Fill(edgeCutScan, den[0]);
+  h_scan_edge_num_BtoC->Fill(edgeCutScan, num[1]);
+  h_scan_edge_den_BtoC->Fill(edgeCutScan, den[1]);
+  h_scan_edge_num_C->Fill(edgeCutScan, num[2]);
+  h_scan_edge_den_C->Fill(edgeCutScan, den[2]);
+  h_scan_edge_fake_B->Fill(edgeCutScan, fake[0]);
+  h_scan_edge_fake_BtoC->Fill(edgeCutScan, fake[1]);
+  h_scan_edge_fake_C->Fill(edgeCutScan, fake[2]);
+  h_scan_edge_events->Fill(edgeCutScan, 1.0f);
+}
+
 
 		
 	
@@ -2091,7 +2281,7 @@ fake_C.push_back(fakeVerticesByPredSub[2]);
        temp_Daughters_flav.clear();
 
        const reco::Candidate* hadron = &(*merged)[i];
-       if (!(hadron->pt() > 10.0 && std::abs(hadron->eta()) < 2.5)) continue;
+       if (!(hadron->pt() > 0.0 && std::abs(hadron->eta()) < 2.5)) continue;
 
        int hadPDG = checkPDG(std::abs(hadron->pdgId())); // 1=B, 2=D, 3=S, 4=tau, 5=other
 

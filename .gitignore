@@ -1,6 +1,7 @@
 *.log
 *.root
 *.png
+*.pdf
 *.json
 *.pb
 *.csv
