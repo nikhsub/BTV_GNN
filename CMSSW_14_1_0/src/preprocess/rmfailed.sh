@@ -7,14 +7,14 @@ if [ -z "$EOS_DIR" ]; then
   exit 1
 fi
 
-echo "Deleting files < 1GB in $EOS_DIR..."
+echo "Deleting files < 100 MB in $EOS_DIR..."
 
 eosls -l "$EOS_DIR" | awk -v dir="$EOS_DIR" '
 {
   size = $5
   name = $NF
 
-  if (size < 1000000000) {
+  if (size < 100000000) {
     cmd = "eosrm " dir "/" name
     print cmd
     system(cmd)

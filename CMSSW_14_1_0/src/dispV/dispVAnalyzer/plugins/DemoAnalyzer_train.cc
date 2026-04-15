@@ -1,9 +1,9 @@
 // -*- C++ -*-
 //
-// Package:    Demo/DemoAnalyzer
-// Class:      DemoAnalyzer
+// Package:    Demo/DemoAnalyzer_train
+// Class:      DemoAnalyzer_train
 //
-/**\class DemoAnalyzer DemoAnalyzer.cc Demo/DemoAnalyzer/plugins/DemoAnalyzer.cc
+/**\class DemoAnalyzer_train DemoAnalyzer_train.cc Demo/DemoAnalyzer_train/plugins/DemoAnalyzer_train.cc
 
  Description: [one line class summary]
 
@@ -19,7 +19,7 @@
 //
 // constructors and destructor
 
-#include "dispV/dispVAnalyzer/interface/DemoAnalyzer.h"
+#include "dispV/dispVAnalyzer/interface/DemoAnalyzer_train.h"
 #include "dispV/dispVAnalyzer/interface/matchedHadronsToSV.h"
 #include <iostream>
 #include <omp.h>
@@ -28,7 +28,7 @@
 #include <unordered_map>
 #include "TH1F.h"
 
-// function to get 3D distance bewtween all SV and all GV
+ //function to get 3D distance bewtween all SV and all GV
 static std::vector<std::vector<float>> computeDistanceMatrix(
                 const std::vector<float>& SV_x,
                 const std::vector<float>& SV_y,
@@ -60,7 +60,7 @@ static std::vector<std::vector<float>> computeDistanceMatrix(
 }
 
 // Constructor
-DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *cache):
+DemoAnalyzer_train::DemoAnalyzer_train(const edm::ParameterSet& iConfig, const ONNXRuntime *cache):
     // Member Initialization
     //esConsumes -> token to EventSetup module
     //consumes -> token to Event data module
@@ -81,27 +81,27 @@ DemoAnalyzer::DemoAnalyzer(const edm::ParameterSet& iConfig, const ONNXRuntime *
     	vtxmaker_(vtxconfig_),
 	PupInfoT_ (consumes<std::vector<PileupSummaryInfo>>(iConfig.getUntrackedParameter<edm::InputTag>("addPileupInfo"))),
 	vtxweight_(iConfig.getUntrackedParameter<double>("vtxweight")),
-	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer"))),
-	genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
+	clusterizer(new TracksClusteringFromDisplacedSeed(iConfig.getParameter<edm::ParameterSet>("clusterizer")))
+	//genmatch_csv_(iConfig.getParameter<edm::FileInPath>("genmatch_csv").fullPath())
 {
 	edm::Service<TFileService> fs;	
    	tree = fs->make<TTree>("tree", "tree");
 }
 
 // Destructor
-DemoAnalyzer::~DemoAnalyzer() {}
+DemoAnalyzer_train::~DemoAnalyzer_train() {}
 
 
 // Tell ONNXRunTime where is file location
-std::unique_ptr<ONNXRuntime> DemoAnalyzer::initializeGlobalCache(const edm::ParameterSet &iConfig) 
+std::unique_ptr<ONNXRuntime> DemoAnalyzer_train::initializeGlobalCache(const edm::ParameterSet &iConfig) 
 {
     return std::make_unique<ONNXRuntime>(iConfig.getParameter<edm::FileInPath>("model_path").fullPath());
 }
 
-void DemoAnalyzer::globalEndJob(const ONNXRuntime *cache) {}
+void DemoAnalyzer_train::globalEndJob(const ONNXRuntime *cache) {}
 
 
-int DemoAnalyzer::checkPDG(int abs_pdg)
+int DemoAnalyzer_train::checkPDG(int abs_pdg)
 // Returns:
 // 1 B hadron
 // 2 D hadron
@@ -138,7 +138,7 @@ int DemoAnalyzer::checkPDG(int abs_pdg)
     return 5;
 }
 
-int DemoAnalyzer::getDaughterLabel(const reco::GenParticle* dau)
+int DemoAnalyzer_train::getDaughterLabel(const reco::GenParticle* dau)
 {
     // Label meaning:
     // 0 = Primary (hard scatter)
@@ -203,7 +203,7 @@ int DemoAnalyzer::getDaughterLabel(const reco::GenParticle* dau)
 
 
 
-bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
+bool DemoAnalyzer_train::isGoodVtx(TransientVertex& tVTX){
 
    reco::Vertex tmpvtx(tVTX);
    //return (tVTX.isValid() &&
@@ -216,7 +216,7 @@ bool DemoAnalyzer::isGoodVtx(TransientVertex& tVTX){
 
 
 
-std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::TransientTrack> &Tracks,
+std::vector<TransientVertex> DemoAnalyzer_train::TrackVertexRefit(std::vector<reco::TransientTrack> &Tracks,
                                                             std::vector<TransientVertex> &VTXs)
     //TrackVertexRefit
     // INPUTS
@@ -254,7 +254,7 @@ std::vector<TransientVertex> DemoAnalyzer::TrackVertexRefit(std::vector<reco::Tr
   return newVTXs;
 }
 
-void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFraction, double minSignificance) 
+void DemoAnalyzer_train::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFraction, double minSignificance) 
 //merges (removes) close, overlapping vertices based on shared tracks and distance significance.
 // INPUTS
 // - VTXs : vertex collection
@@ -310,7 +310,7 @@ void DemoAnalyzer::vertexMerge(std::vector<TransientVertex>& VTXs, double maxFra
 }
 
 std::vector<TransientVertex>
-DemoAnalyzer::TrackVertexArbitrator(const reco::Vertex& pv,
+DemoAnalyzer_train::TrackVertexArbitrator(const reco::Vertex& pv,
                                     const edm::Handle<reco::BeamSpot>& bsH,
                                     const std::vector<TransientVertex>& seedSVs,
                                     std::vector<reco::TransientTrack>& allTTs,
@@ -469,7 +469,7 @@ DemoAnalyzer::TrackVertexArbitrator(const reco::Vertex& pv,
   return out;
 }
 
-inline float DemoAnalyzer::sigmoid(float x) {
+inline float DemoAnalyzer_train::sigmoid(float x) {
     if (std::isnan(x)) return 0.0f;  // handle NaN safely
     if (x >= 0.0f) {
         float z = std::exp(-x);
@@ -486,7 +486,7 @@ inline float DemoAnalyzer::sigmoid(float x) {
 
 
 // ------------ method called for each event  ------------
-void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
+void DemoAnalyzer_train::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup) {
   using namespace edm;
   using namespace reco;
   using namespace pat;
@@ -497,11 +497,11 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
 
   const SigMatchEntry* genmatch = nullptr;
 
-  auto key = std::make_tuple(run_, lumi_, evt_);
-  auto it = sigMatchMap_.find(key);
-  if (it != sigMatchMap_.end()) {
-      genmatch = &it->second;
-  }
+  //auto key = std::make_tuple(run_, lumi_, evt_);
+  //auto it = sigMatchMap_.find(key);
+  //if (it != sigMatchMap_.end()) {
+  //    genmatch = &it->second;
+  //}
 
   std::unordered_map<int, std::pair<int,int>> truthByTrack; // trkIdx -> (label, hadidx)
   truthByTrack.reserve(256);
@@ -509,14 +509,14 @@ void DemoAnalyzer::analyze(const edm::Event& iEvent, const edm::EventSetup& iSet
   std::unordered_set<int> matchedTruthTracks;
   matchedTruthTracks.reserve(256);
   
-  if (genmatch) {
-    for (size_t k = 0; k < genmatch->indices.size(); ++k) {
-      int trk = genmatch->indices[k];
-      int lab = genmatch->labels[k];
-      int hid = genmatch->hadidx[k];
-      truthByTrack.emplace(trk, std::make_pair(lab, hid));
-    }
-  }
+  //if (genmatch) {
+  //  for (size_t k = 0; k < genmatch->indices.size(); ++k) {
+  //    int trk = genmatch->indices[k];
+  //    int lab = genmatch->labels[k];
+  //    int hid = genmatch->hadidx[k];
+  //    truthByTrack.emplace(trk, std::make_pair(lab, hid));
+  //  }
+  //}
 
   nPU = 0;
     //vectors defined in .h
@@ -2482,20 +2482,12 @@ for (float edgeCutScan : scanSVcuts) {
 
 
 
-
-
-
-
-
-
-
-
    tree->Fill();
 
 }
 
 // ------------ method called once each job just before starting event loop  ------------
-void DemoAnalyzer::beginStream(edm::StreamID) {
+void DemoAnalyzer_train::beginStream(edm::StreamID) {
 
 	tree->Branch("run", &run_, "run/i");
    	tree->Branch("lumi", &lumi_, "lumi/i");
@@ -2613,127 +2605,127 @@ void DemoAnalyzer::beginStream(edm::StreamID) {
     tree->Branch("fake_C", &fake_C);
     
 
-	auto strip_chars = [&](std::string& s, const std::string& chars) {
-	  s.erase(std::remove_if(s.begin(), s.end(),
-	                         [&](char c){ return chars.find(c) != std::string::npos; }),
-	          s.end());
-	};
-	
-	auto trim_inplace = [&](std::string& s) {
-	  auto notspace = [](unsigned char c){ return !std::isspace(c); };
-	  s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
-	  s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
-	};
-	
-	auto parse_int_list = [&](std::string s) -> std::vector<int> {
-	  strip_chars(s, "\"[]");
-	  std::vector<int> out;
-	  std::stringstream ss(s);
-	  std::string tok;
-	  while (std::getline(ss, tok, ',')) {
-	    trim_inplace(tok);
-	    if (!tok.empty()) out.push_back(std::stoi(tok));
-	  }
-	  return out;
-	};
+	//auto strip_chars = [&](std::string& s, const std::string& chars) {
+	//  s.erase(std::remove_if(s.begin(), s.end(),
+	//                         [&](char c){ return chars.find(c) != std::string::npos; }),
+	//          s.end());
+	//};
+	//
+	//auto trim_inplace = [&](std::string& s) {
+	//  auto notspace = [](unsigned char c){ return !std::isspace(c); };
+	//  s.erase(s.begin(), std::find_if(s.begin(), s.end(), notspace));
+	//  s.erase(std::find_if(s.rbegin(), s.rend(), notspace).base(), s.end());
+	//};
+	//
+	//auto parse_int_list = [&](std::string s) -> std::vector<int> {
+	//  strip_chars(s, "\"[]");
+	//  std::vector<int> out;
+	//  std::stringstream ss(s);
+	//  std::string tok;
+	//  while (std::getline(ss, tok, ',')) {
+	//    trim_inplace(tok);
+	//    if (!tok.empty()) out.push_back(std::stoi(tok));
+	//  }
+	//  return out;
+	//};
 
-	auto splitCSVQuoted = [&](const std::string& line,
-                          std::vector<std::string>& fields,
-                          size_t expected) -> bool {
-	  fields.clear();
-	  std::string cur;
-	  bool inQuotes = false;
-	
-	  for (size_t i = 0; i < line.size(); ++i) {
-	    char c = line[i];
-	
-	    if (c == '"') {
-	      // handle escaped quote ""
-	      if (inQuotes && i + 1 < line.size() && line[i + 1] == '"') {
-	        cur.push_back('"');
-	        ++i;
-	      } else {
-	        inQuotes = !inQuotes;
-	      }
-	    } else if (c == ',' && !inQuotes) {
-	      fields.push_back(cur);
-	      cur.clear();
-	    } else {
-	      cur.push_back(c);
-	    }
-	  }
-	  fields.push_back(cur);
-	
-	  return (fields.size() == expected);
-	};
+	//auto splitCSVQuoted = [&](const std::string& line,
+        //                  std::vector<std::string>& fields,
+        //                  size_t expected) -> bool {
+	//  fields.clear();
+	//  std::string cur;
+	//  bool inQuotes = false;
+	//
+	//  for (size_t i = 0; i < line.size(); ++i) {
+	//    char c = line[i];
+	//
+	//    if (c == '"') {
+	//      // handle escaped quote ""
+	//      if (inQuotes && i + 1 < line.size() && line[i + 1] == '"') {
+	//        cur.push_back('"');
+	//        ++i;
+	//      } else {
+	//        inQuotes = !inQuotes;
+	//      }
+	//    } else if (c == ',' && !inQuotes) {
+	//      fields.push_back(cur);
+	//      cur.clear();
+	//    } else {
+	//      cur.push_back(c);
+	//    }
+	//  }
+	//  fields.push_back(cur);
+	//
+	//  return (fields.size() == expected);
+	//};
     
 
-	std::ifstream file(genmatch_csv_);
-	std::string line;
-	unsigned int line_no = 0;
-	std::vector<std::string> fields;
-	
-	while (std::getline(file, line)) {
-	    ++line_no;
-	    if (line.empty()) continue;
-	  
-	    if (!splitCSVQuoted(line, fields, 5)) {
-	      std::cerr << "Line " << line_no
-	                << ": bad CSV field count = " << fields.size()
-	                << "\nLine: " << line << "\n";
-	      continue;
-	    }
-	  
-	    const std::string& run_str    = fields[0];
-	    const std::string& lumi_str   = fields[1];
-	    const std::string& evt_str    = fields[2];
-	    const std::string& labels_str = fields[3];
-	    const std::string& hadidx_str = fields[4];
-	  
-	    if (run_str == "run") continue; // header
-	  
-	    const unsigned int run  = std::stoul(run_str);
-	    const unsigned int lumi = std::stoul(lumi_str);
-	    const unsigned int evt  = std::stoul(evt_str);
-	  
-	    const std::vector<int> trk_labels = parse_int_list(labels_str);
-	    const std::vector<int> trk_hadidx = parse_int_list(hadidx_str);
-	  
-	    if (trk_labels.size() != trk_hadidx.size()) {
-	      std::cerr << "Line " << line_no
-	                << ": size mismatch labels=" << trk_labels.size()
-	                << " hadidx=" << trk_hadidx.size() << "\n";
-	      continue;
-	    }
+	//std::ifstream file(genmatch_csv_);
+	//std::string line;
+	//unsigned int line_no = 0;
+	//std::vector<std::string> fields;
+	//
+	//while (std::getline(file, line)) {
+	//    ++line_no;
+	//    if (line.empty()) continue;
+	//  
+	//    if (!splitCSVQuoted(line, fields, 5)) {
+	//      std::cerr << "Line " << line_no
+	//                << ": bad CSV field count = " << fields.size()
+	//                << "\nLine: " << line << "\n";
+	//      continue;
+	//    }
+	//  
+	//    const std::string& run_str    = fields[0];
+	//    const std::string& lumi_str   = fields[1];
+	//    const std::string& evt_str    = fields[2];
+	//    const std::string& labels_str = fields[3];
+	//    const std::string& hadidx_str = fields[4];
+	//  
+	//    if (run_str == "run") continue; // header
+	//  
+	//    const unsigned int run  = std::stoul(run_str);
+	//    const unsigned int lumi = std::stoul(lumi_str);
+	//    const unsigned int evt  = std::stoul(evt_str);
+	//  
+	//    const std::vector<int> trk_labels = parse_int_list(labels_str);
+	//    const std::vector<int> trk_hadidx = parse_int_list(hadidx_str);
+	//  
+	//    if (trk_labels.size() != trk_hadidx.size()) {
+	//      std::cerr << "Line " << line_no
+	//                << ": size mismatch labels=" << trk_labels.size()
+	//                << " hadidx=" << trk_hadidx.size() << "\n";
+	//      continue;
+	//    }
  
-	
-	    SigMatchEntry entry;
-	    entry.indices.reserve(trk_labels.size());
-	    entry.labels.reserve(trk_labels.size());
-	    entry.hadidx.reserve(trk_labels.size());
-	
-	    for (size_t i = 0; i < trk_labels.size(); ++i) {
-	      const int lab = trk_labels[i];
-	      if (lab == 2 || lab == 3 || lab == 4) {
-	        entry.indices.push_back(static_cast<int>(i));  // track index
-	        entry.labels.push_back(lab);                   // label at i
-	        entry.hadidx.push_back(trk_hadidx[i]);         // hadidx at i
-	      }
-	    }
-	
-	    sigMatchMap_[{run, lumi, evt}] = std::move(entry);
-	
-	  } 
+	//
+	//    SigMatchEntry entry;
+	//    entry.indices.reserve(trk_labels.size());
+	//    entry.labels.reserve(trk_labels.size());
+	//    entry.hadidx.reserve(trk_labels.size());
+	//
+	//    for (size_t i = 0; i < trk_labels.size(); ++i) {
+	//      const int lab = trk_labels[i];
+	//      if (lab == 2 || lab == 3 || lab == 4) {
+	//        entry.indices.push_back(static_cast<int>(i));  // track index
+	//        entry.labels.push_back(lab);                   // label at i
+	//        entry.hadidx.push_back(trk_hadidx[i]);         // hadidx at i
+	//      }
+	//    }
+	//
+	//    sigMatchMap_[{run, lumi, evt}] = std::move(entry);
+	//
+	//  } 
    	
 }
 
 
 // ------------ method called once each job just after ending the event loop  ------------
-//void DemoAnalyzer::endJob() {
+//void DemoAnalyzer_train::endJob() {
 //}
 
 // ------------ method fills 'descriptions' with the allowed parameters for the module  ------------
-void DemoAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
+void DemoAnalyzer_train::fillDescriptions(edm::ConfigurationDescriptions& descriptions) {
   //The following says we do not know what parameters are allowed so do no validation
   // Please change this to state exactly what you do use, even if it is no parameters
   edm::ParameterSetDescription desc;
@@ -2747,4 +2739,4 @@ void DemoAnalyzer::fillDescriptions(edm::ConfigurationDescriptions& descriptions
 }
 
 //define this as a plug-in
-DEFINE_FWK_MODULE(DemoAnalyzer);
+DEFINE_FWK_MODULE(DemoAnalyzer_train);

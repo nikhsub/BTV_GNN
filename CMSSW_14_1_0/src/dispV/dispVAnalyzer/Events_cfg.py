@@ -57,7 +57,7 @@ process.mergedGenParticles = cms.EDProducer("MergedGenParticleProducer",
                                             )
 
 
-process.demo = cms.EDAnalyzer('DemoAnalyzer',
+process.demo = cms.EDAnalyzer('DemoAnalyzer_train',
     training = cms.untracked.bool(True),
     packed = cms.InputTag("packedGenParticles"),
     pruned = cms.InputTag("prunedGenParticles"),
@@ -77,12 +77,12 @@ process.demo = cms.EDAnalyzer('DemoAnalyzer',
     TrackPredCut = cms.untracked.double(0.0),
     #TrackPredCut = cms.untracked.double(options.trackCut),
     clusterizer = ClusteringParam,
-    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/bhive_hcmod_1703.onnx"),
+    model_path = cms.FileInPath("dispV/dispVAnalyzer/data/bhive_hcmod_1703.onnx")
     #genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup10k1202.csv")
-    genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_hc_3k_0303.csv")
+    #genmatch_csv = cms.FileInPath("dispV/dispVAnalyzer/geninfo/geninfo_ntup_hc_3k_0303.csv")
 )
 process.TFileService = cms.Service("TFileService",
-        fileName = cms.string("output_hc.root"),
+        fileName = cms.string("output_hb.root"),
         #fileName = cms.string(options.outfile),
 )
 

@@ -20,7 +20,7 @@ fi
 cd "$current"
 
 EOS_PREFIX="root://cmseos.fnal.gov"
-EOS_OUT_DIR="/store/user/nvenkata/BTV/fortrain_ttbarhad_root_1903_redo/"
+EOS_OUT_DIR="/store/group/lpcljm/nvenkata/hplusb/fortrain_hplusb_root_3103"
 
 LOCAL_OUT=""
 ARGS=("$@")

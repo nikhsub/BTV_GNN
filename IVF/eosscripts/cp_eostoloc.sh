@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # EOS directory to copy FROM
-EOS_DIR="/store/user/nvenkata/BTV/fortrain_ttbarhad_root_1903_redo"
+EOS_DIR="/store/group/lpcljm/nvenkata/hplusb/fortrain_hplusb_root_3103"
 
 # Local directory to copy TO
-LOCAL_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/btv"
+LOCAL_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/hplusb"
 
 # Full EOS root URL prefix
 EOS_ROOT="root://cmseos.fnal.gov"

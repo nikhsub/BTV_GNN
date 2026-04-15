@@ -33,6 +33,8 @@ def create_condor_submit_file(folder, key, pyscript, bashjob, filename, current,
         fcondor.write("Universe = vanilla\n")
         fcondor.write(f"transfer_input_files = {pyscript}\n")
         fcondor.write("should_transfer_files = YES\n")
+        fcondor.write("when_to_transfer_output = ON_EXIT\n")
+        fcondor.write('transfer_output_files = ""\n')
         fcondor.write(f"Output = {folder}/run_{key}.out\n")
         fcondor.write(f"Error  = {folder}/run_{key}.err\n")
         fcondor.write(f"Log    = {folder}/run_{key}.log\n")
