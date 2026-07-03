@@ -25,10 +25,10 @@ config.JobType.pluginName = 'Analysis'
 #config.JobType.maxMemoryMB = 3000
 #config.JobType.allowUndistributedCMSSW = True
 
-config.Data.splitting = 'FileBased'
-config.Data.unitsPerJob = 1
+#config.Data.splitting = 'FileBased'
+#config.Data.unitsPerJob = 1
 #config.Data.totalUnits = 60
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/hplusc/hc_fortrain_2018_HZZ4l_4FS_'+str(timestamp)
+config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/hc_2018_HZZ4l_4FS_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -48,18 +48,38 @@ def submit(config):
 
 def sub_crab_job():
 
-    #datasetname = getstatusoutput("das_client --query='dataset=/splitSUSY_M1000_"+str(mass)+"_ctau"+str(life)+"p0_TuneCP2_13TeV-pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*'")[1].split("\n")[0]
-    #datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
-    datasetname = getstatusoutput("das_client --query='dataset='/HPlusCharm_4FS_MuRFScaleDynX0p50_HToZZTo4L_M125_TuneCP5_13TeV_amcatnlo_JHUGenV7011_pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v2/MINIAODSIM*")[1].split("\n")[0]
-    config.General.requestName = 'MC_hplusc4FS_2018_HZZ4l_'+str(timestamp)
-    config.JobType.psetName = 'Events_cfg.py'
-    config.Data.outputDatasetTag = 'MC_hplusc4FS_2018_HZZ4l_'+str(timestamp)
+    datasetname = (
+        "/HPlusCharm_4FS_MuRFScaleDynX0p50_HToZZTo4L_M125_TuneCP5_13TeV_amcatnlo_JHUGenV7011_pythia8"
+        "/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v2"
+        "/MINIAODSIM"
+    )
+
+    config.General.requestName = 'MC_hplusc4FS_2018_HZZ4l_' + str(timestamp)
+
+    config.JobType.psetName = 'train_part_cfg.py'
+    config.JobType.pyCfgParams = [
+        'outfile=output_hc_2018_4FS.root'
+    ]
+
     config.Data.inputDataset = datasetname
+    config.Data.inputDBS = 'global'
+
+    # Event-aware lumi splitting.
+    # Targets approximately this many events/job, while respecting lumi boundaries.
+    config.Data.splitting = 'EventAwareLumiBased'
+    config.Data.unitsPerJob = 500
+
+    # Optional small test before full production.
+    # Uncomment for a test submission.
+    config.Data.totalUnits = 1500000
+
+    config.Data.outputDatasetTag = 'MC_hplusc4FS_2018_HZZ4l_' + str(timestamp)
+
+    print("Submitting dataset:")
     print(datasetname)
-    #submit(config)
+
     p = Process(target=submit, args=(config,))
     p.start()
     p.join()
-
 
 sub_crab_job()

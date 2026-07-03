@@ -28,7 +28,7 @@ config.JobType.pluginName = 'Analysis'
 config.Data.splitting = 'FileBased'
 config.Data.unitsPerJob = 1
 #config.Data.totalUnits = 60
-config.Data.outLFNDirBase = '/store/group/lpcljm/nvenkata/hplusb/hb_fortrain_2016_HZZ4l_5FS_'+str(timestamp)
+config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/hb_2016_HZZ4l_5FS_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -52,7 +52,10 @@ def sub_crab_job():
     #datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
     datasetname = getstatusoutput("das_client --query='dataset='/HPlusBottom_5FS_MuRFScaleDynX0p50_HToZZTo4L_M125_TuneCP5_13TeV_amcatnlo_JHUGenV7011_pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*")[1].split("\n")[0]
     config.General.requestName = 'MC_hplusb5FS_2016_HZZ4l_'+str(timestamp)
-    config.JobType.psetName = 'Events_cfg.py'
+    config.JobType.psetName = 'train_part_cfg.py'
+    config.JobType.pyCfgParams = [
+    'outfile=output_hb_2016_5FS.root'
+    ]
     config.Data.outputDatasetTag = 'MC_hplusb5FS_2016_HZZ4l_'+str(timestamp)
     config.Data.inputDataset = datasetname
     print(datasetname)

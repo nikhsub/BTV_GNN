@@ -1,10 +1,14 @@
 #!/bin/bash
 
 # EOS directory to copy FROM
-EOS_DIR="/store/group/lpcljm/nvenkata/hplusb/fortrain_hplusb_root_3103"
+#EOS_DIR="/store/user/nvenkata/BTV/hc_vertex_2018_HZZ4l_3FS_1505/HPlusCharm_3FS_MuRFScaleDynX0p50_HToZZTo4L_M125_TuneCP5_13TeV_amcatnlo_JHUGenV7011_pythia8/MC_vertex_hplusc3FS_2018_HZZ4l_1505/260515_205755/0000"
+
+#EOS_DIR=$(xrdfsls /store/user/nvenkata/BTV/hb_vertex_2018_HZZ4l_5FS_1505/HPlusBottom_5FS_MuRFScaleDynX0p50_HToZZTo4L_M125_TuneCP5_13TeV_amcatnlo_JHUGenV7011_pythia8/MC_vertex_hplusb5FS_2018_HZZ4l_1505)/0000
+
+EOS_DIR=$(xrdfsls /store/user/nvenkata/BTV/ttbarhad_2018_2406/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/MC_ttbarhad_2406)/0000
 
 # Local directory to copy TO
-LOCAL_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/hplusb"
+LOCAL_DIR="/uscmst1b_scratch/lpc1/3DayLifetime/nvenkata/ttbarhad/"
 
 # Full EOS root URL prefix
 EOS_ROOT="root://cmseos.fnal.gov"

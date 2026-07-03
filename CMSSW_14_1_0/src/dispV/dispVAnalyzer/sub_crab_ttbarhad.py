@@ -31,11 +31,11 @@ config.JobType.pluginName = 'Analysis'
 #config.JobType.maxMemoryMB = 3000
 #config.JobType.allowUndistributedCMSSW = True
 
-config.Data.splitting = 'FileBased'
-config.Data.unitsPerJob = 1
-config.Data.totalUnits = 70
+#config.Data.splitting = 'FileBased'
+#config.Data.unitsPerJob = 1
+#config.Data.totalUnits = 70
 
-config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/ttbarhad_70files_'+str(timestamp)
+config.Data.outLFNDirBase = '/store/user/nvenkata/BTV/ttbarhad_2018_'+str(timestamp)
 config.Data.publication = False
 
 config.Site.storageSite = 'T3_US_FNALLPC'
@@ -62,45 +62,80 @@ def submit(config):
     except ClientException as cle:
         print("Failed submitting task: %s", (cle))
 
-
 def sub_crab_job():
 
-    #datasetname = getstatusoutput("das_client --query='dataset=/splitSUSY_M1000_"+str(mass)+"_ctau"+str(life)+"p0_TuneCP2_13TeV-pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*'")[1].split("\n")[0]
-    datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
-
-    #datasetname = getstatusoutput("das_client --query='dataset='/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
-
-   # dataset_query = "/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM"
     dataset_query = "/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM"
-    files_query = f"file dataset={dataset_query}"
-    status, files = getstatusoutput(f"dasgoclient --query='{files_query}'")
-    
-    if status != 0:
-        print("Error querying DAS for files:", files)
-        return
-    
-    # Filter files from 100 to 200 (zero-indexed)
-    file_list = files.split('\n')[0:70]
-    if not file_list:
-        print("No files found in the specified range (0–70).")
-        return
 
-    # Save the filtered file list to a local text file (optional)
-    with open("filelist_0_70.txt", "w") as f:
-        for file in file_list:
-            f.write(file + '\n')
+    config.Data.inputDataset = dataset_query
+    config.Data.inputDBS = 'global'
 
-    config.Data.userInputFiles = file_list
-    config.General.requestName = 'MC_ttbarhad_'+str(timestamp)
-    config.JobType.psetName = 'Events_cfg.py'
-    config.Data.outputDatasetTag = 'MC_ttbarhad_'+str(timestamp)
+    # Event-aware MC splitting
+    config.Data.splitting = 'EventAwareLumiBased'
 
-    #config.Data.inputDataset = datasetname
-    #print(datasetname)
-    #submit(config)
+    # Tune this based on output size.
+    # 1000 events ~ 3.6 GB, so 500 events ~ 1.8 GB.
+    config.Data.unitsPerJob = 500
+
+    # If you want roughly the same amount as 70 files:
+    # 70 files * ~48k events/file
+    config.Data.totalUnits = 1500000
+
+    config.General.requestName = 'MC_ttbarhad_' + str(timestamp)
+
+    config.JobType.psetName = 'train_part_cfg.py'
+    config.JobType.pyCfgParams = [
+        'outfile=output_ttbar_2018.root'
+    ]
+
+    config.Data.outputDatasetTag = 'MC_ttbarhad_' + str(timestamp)
+
     p = Process(target=submit, args=(config,))
     p.start()
     p.join()
+
+
+#def sub_crab_job():
+#
+#    #datasetname = getstatusoutput("das_client --query='dataset=/splitSUSY_M1000_"+str(mass)+"_ctau"+str(life)+"p0_TuneCP2_13TeV-pythia8/RunIISummer20UL16MiniAODv2-106X_mcRun2_asymptotic_v17-v2/MINIAODSIM*'")[1].split("\n")[0]
+#    datasetname = getstatusoutput("das_client --query='dataset='/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+#
+#    #datasetname = getstatusoutput("das_client --query='dataset='/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM*")[1].split("\n")[0]
+#
+#   # dataset_query = "/TTTo2L2Nu_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM"
+#    dataset_query = "/TTToHadronic_TuneCP5_13TeV-powheg-pythia8/RunIISummer20UL18MiniAODv2-106X_upgrade2018_realistic_v16_L1v1-v1/MINIAODSIM"
+#    files_query = f"file dataset={dataset_query}"
+#    status, files = getstatusoutput(f"dasgoclient --query='{files_query}'")
+#    
+#    if status != 0:
+#        print("Error querying DAS for files:", files)
+#        return
+#    
+#    # Filter files from 100 to 200 (zero-indexed)
+#    file_list = files.split('\n')[0:70]
+#    if not file_list:
+#        print("No files found in the specified range (0–70).")
+#        return
+#
+#    # Save the filtered file list to a local text file (optional)
+#    with open("filelist_0_70.txt", "w") as f:
+#        for file in file_list:
+#            f.write(file + '\n')
+#
+#    config.Data.userInputFiles = file_list
+#    config.General.requestName = 'MC_ttbarhad_'+str(timestamp)
+#    #config.JobType.psetName = 'train_part_cfg.py'
+#    config.JobType.psetName = 'train_part_cfg.py' 
+#    config.JobType.pyCfgParams = [
+#    'outfile=output_ttbar.root'
+#    ]
+#    config.Data.outputDatasetTag = 'MC_ttbarhad_'+str(timestamp)
+#
+#    #config.Data.inputDataset = datasetname
+#    #print(datasetname)
+#    #submit(config)
+#    p = Process(target=submit, args=(config,))
+#    p.start()
+#    p.join()
 
 
 #infile = open('XXTo4J_MAAAA_CTauBBBBmm_TuneCP2_13TeV_pythia8_GENSIM.py')

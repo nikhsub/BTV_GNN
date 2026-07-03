@@ -63,3 +63,6 @@ IVF/stats
 IVF/scaler
 IVF/mods_onnx
 CMSSW_14_1_0/src/genmatch/1703_ttbar_had/
+CMSSW_15_1_1/
+MiniToNano/
+old/
